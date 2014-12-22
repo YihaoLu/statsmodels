@@ -27,6 +27,9 @@ import statsmodels.regression.linear_model as lm
 import statsmodels.base.wrapper as wrap
 from statsmodels.compat.numpy import np_matrix_rank
 
+# need import in module instead of lazily to copy `__doc__`
+from . import _prediction as pred
+
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
 __all__ = ['GLM']
@@ -1002,6 +1005,32 @@ class GLMResults(base.LikelihoodModelResults):
     @cache_readonly
     def bic(self):
         return self.deviance - self.df_resid*np.log(self.nobs)
+
+
+    def get_prediction(self, exog=None, exposure=None, offset=None,
+                       transform=True, linear=False,
+                       row_labels=None):
+
+        import statsmodels.regression._prediction as linpred
+
+        pred_kwds = {'exposure': exposure, 'offset': offset, 'linear': True}
+
+        # two calls to a get_prediction duplicates exog generation if patsy
+        res_linpred = linpred.get_prediction(self, exog=exog, transform=transform,
+                              row_labels=row_labels, pred_kwds=pred_kwds)
+
+        pred_kwds['linear'] = False
+        res = pred.get_prediction_glm(self, exog=exog, transform=transform,
+                                      row_labels=row_labels,
+                                      linpred=res_linpred,
+                                      link=self.model.family.link,
+                                      pred_kwds=pred_kwds)
+
+        return res
+
+
+    get_prediction.__doc__ = pred.get_prediction_glm.__doc__
+
 
     def remove_data(self):
         #GLM has alias/reference in result instance
