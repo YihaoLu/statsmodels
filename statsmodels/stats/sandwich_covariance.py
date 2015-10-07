@@ -102,6 +102,7 @@ Statistics 90, no. 3 (2008): 414–427.
 
 """
 from statsmodels.compat.python import range
+import pandas as pd
 import numpy as np
 
 from statsmodels.tools.grouputils import Group
@@ -235,10 +236,14 @@ def _get_sandwich_arrays(results):
         # assume we have a results instance
         if hasattr(results.model, 'jac'):
             xu = results.model.jac(results.params)
+            hessian_inv = np.linalg.inv(results.model.hessian(results.params))
+        elif hasattr(results.model, 'score_obs'):
+            xu = results.model.score_obs(results.params)
+            hessian_inv = np.linalg.inv(results.model.hessian(results.params))
         else:
-            xu = results.model.exog * results.resid[:, None]
+            xu = results.model.wexog * results.wresid[:, None]
 
-        hessian_inv = np.asarray(results.normalized_cov_params)
+            hessian_inv = np.asarray(results.normalized_cov_params)
     else:
         raise ValueError('need either tuple of (jac, hessian_inv) or results' +
                          'instance')
@@ -340,7 +345,7 @@ def weights_uniform(nlags):
     '''
 
     #with lag zero
-    return np.ones(nlags+1.)
+    return np.ones(nlags+1)
 
 def S_hac_simple(x, nlags=None, weights_func=weights_bartlett):
     '''inner covariance matrix for HAC (Newey, West) sandwich
@@ -429,6 +434,11 @@ def group_sums(x, group):
     '''
 
     #TODO: transpose return in group_sum, need test coverage first
+
+    # re-label groups or bincount takes too much memory
+    if np.max(group) > 2 * x.shape[0]:
+        group = pd.factorize(group)[0]
+
     return np.array([np.bincount(group, weights=x[:, col])
                             for col in range(x.shape[1])])
 

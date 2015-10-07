@@ -9,12 +9,16 @@ License: BSD-3
 currently all tests are against R
 
 """
+#import warnings
+#warnings.simplefilter("default")
+# ResourceWarning doesn't exist in python 2
+#warnings.simplefilter("ignore", ResourceWarning)
 import os
 
 import numpy as np
 
 from numpy.testing import (assert_, assert_almost_equal, assert_equal,
-                           assert_approx_equal)
+                           assert_approx_equal, assert_allclose)
 from nose import SkipTest
 
 from statsmodels.regression.linear_model import OLS, GLSAR
@@ -219,13 +223,13 @@ class TestDiagnosticG(object):
         assert_equal(gq[-1], 'two-sided')
         #TODO other options ???
 
-    def test_het_breush_pagan(self):
+    def test_het_breusch_pagan(self):
         res = self.res
 
         bptest = dict(statistic=0.709924388395087, pvalue=0.701199952134347,
                       parameters=(2,), distr='f')
 
-        bp = smsdia.het_breushpagan(res.resid, res.model.exog)
+        bp = smsdia.het_breuschpagan(res.resid, res.model.exog)
         compare_t_est(bp, bptest, decimal=(12, 12))
 
 
@@ -277,28 +281,28 @@ class TestDiagnosticG(object):
         res3 = smsdia.het_arch(resid, maxlag=1, autolag='aic')
         assert_almost_equal(res3[:4], res1[:4], decimal=13)
 
-    def test_acorr_breush_godfrey(self):
+    def test_acorr_breusch_godfrey(self):
         res = self.res
 
         #bgf = bgtest(fm, order = 4, type="F")
-        breushgodfrey_f = dict(statistic=1.179280833676792,
+        breuschgodfrey_f = dict(statistic=1.179280833676792,
                                pvalue=0.321197487261203,
                                parameters=(4,195,), distr='f')
 
         #> bgc = bgtest(fm, order = 4, type="Chisq")
-        #> mkhtest(bgc, "breushpagan_c", "chi2")
-        breushgodfrey_c = dict(statistic=4.771042651230007,
+        #> mkhtest(bgc, "breuschpagan_c", "chi2")
+        breuschgodfrey_c = dict(statistic=4.771042651230007,
                                pvalue=0.3116067133066697,
                                parameters=(4,), distr='chi2')
 
-        bg = smsdia.acorr_breush_godfrey(res, nlags=4)
-        bg_r = [breushgodfrey_c['statistic'], breushgodfrey_c['pvalue'],
-                breushgodfrey_f['statistic'], breushgodfrey_f['pvalue']]
+        bg = smsdia.acorr_breusch_godfrey(res, nlags=4)
+        bg_r = [breuschgodfrey_c['statistic'], breuschgodfrey_c['pvalue'],
+                breuschgodfrey_f['statistic'], breuschgodfrey_f['pvalue']]
         assert_almost_equal(bg, bg_r, decimal=13)
 
         # check that lag choice works
-        bg2 = smsdia.acorr_breush_godfrey(res, nlags=None)
-        bg3 = smsdia.acorr_breush_godfrey(res, nlags=14)
+        bg2 = smsdia.acorr_breusch_godfrey(res, nlags=None)
+        bg3 = smsdia.acorr_breusch_godfrey(res, nlags=14)
         assert_almost_equal(bg2, bg3, decimal=13)
 
     def test_acorr_ljung_box(self):
@@ -537,29 +541,29 @@ class TestDiagnosticG(object):
 
         #> library(nortest) #Lilliefors (Kolmogorov-Smirnov) normality test
         #> lt = lillie.test(residuals(fm))
-        #> mkhtest(lt, "lillifors", "-")
-        lillifors1 = dict(statistic=0.0723390908786589,
+        #> mkhtest(lt, "lilliefors", "-")
+        lilliefors1 = dict(statistic=0.0723390908786589,
                           pvalue=0.01204113540102896, parameters=(), distr='-')
 
         #> lt = lillie.test(residuals(fm)**2)
-        #> mkhtest(lt, "lillifors", "-")
-        lillifors2 = dict(statistic=0.301311621898024,
+        #> mkhtest(lt, "lilliefors", "-")
+        lilliefors2 = dict(statistic=0.301311621898024,
                           pvalue=1.004305736618051e-51,
                           parameters=(), distr='-')
 
         #> lt = lillie.test(residuals(fm)[1:20])
-        #> mkhtest(lt, "lillifors", "-")
-        lillifors3 = dict(statistic=0.1333956004203103,
+        #> mkhtest(lt, "lilliefors", "-")
+        lilliefors3 = dict(statistic=0.1333956004203103,
                           pvalue=0.4618672180799566, parameters=(), distr='-')
 
-        lf1 = smsdia.lillifors(res.resid)
-        lf2 = smsdia.lillifors(res.resid**2)
-        lf3 = smsdia.lillifors(res.resid[:20])
+        lf1 = smsdia.lilliefors(res.resid)
+        lf2 = smsdia.lilliefors(res.resid**2)
+        lf3 = smsdia.lilliefors(res.resid[:20])
 
-        compare_t_est(lf1, lillifors1, decimal=(14, 14))
-        compare_t_est(lf2, lillifors2, decimal=(14, 14)) #pvalue very small
-        assert_approx_equal(lf2[1], lillifors2['pvalue'], significant=10)
-        compare_t_est(lf3, lillifors3, decimal=(14, 1))
+        compare_t_est(lf1, lilliefors1, decimal=(14, 14))
+        compare_t_est(lf2, lilliefors2, decimal=(14, 14)) #pvalue very small
+        assert_approx_equal(lf2[1], lilliefors2['pvalue'], significant=10)
+        compare_t_est(lf3, lilliefors3, decimal=(14, 1))
         #R uses different approximation for pvalue in last case
 
         #> ad = ad.test(residuals(fm))
@@ -761,6 +765,27 @@ def test_influence_wrapped():
     assert_almost_equal(infl.dfbetas, infl_r2[:,:3], decimal=13)
     assert_almost_equal(infl.cov_ratio, infl_r2[:,4], decimal=14)
 
+
+def test_influence_dtype():
+    # see #2148  bug when endog is integer
+    y = np.ones(20)
+    np.random.seed(123)
+    x = np.random.randn(20, 3)
+    res1 = OLS(y, x).fit()
+
+    res2 = OLS(y*1., x).fit()
+    cr1 = res1.get_influence().cov_ratio
+    cr2 = res2.get_influence().cov_ratio
+    assert_allclose(cr1, cr2, rtol=1e-14)
+    # regression test for values
+    cr3 = np.array(
+      [ 1.22239215,  1.31551021,  1.52671069,  1.05003921,  0.89099323,
+        1.57405066,  1.03230092,  0.95844196,  1.15531836,  1.21963623,
+        0.87699564,  1.16707748,  1.10481391,  0.98839447,  1.08999334,
+        1.35680102,  1.46227715,  1.45966708,  1.13659521,  1.22799038])
+    assert_almost_equal(cr1, cr3, decimal=8)
+
+
 def test_outlier_test():
     # results from R with NA -> 1. Just testing interface here because
     # outlier_test is just a wrapper
@@ -853,10 +878,10 @@ if __name__ == '__main__':
     #t = TestDiagnosticG()
     #t.test_basic()
     #t.test_hac()
-    #t.test_acorr_breush_godfrey()
+    #t.test_acorr_breusch_godfrey()
     #t.test_acorr_ljung_box()
     #t.test_het_goldfeldquandt()
-    #t.test_het_breush_pagan()
+    #t.test_het_breusch_pagan()
     #t.test_het_white()
     #t.test_compare_lr()
     #t.test_compare_nonnested()

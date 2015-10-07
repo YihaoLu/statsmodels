@@ -9,7 +9,9 @@ Author: Josef Perktold
 import numpy as np
 from scipy import stats
 
-from numpy.testing import assert_allclose, assert_equal, assert_warns
+from numpy.testing import (assert_allclose, assert_equal, assert_warns,
+                           assert_raises)
+
 
 from statsmodels.regression.linear_model import OLS, WLS
 import statsmodels.stats.sandwich_covariance as sw
@@ -380,6 +382,45 @@ class TestOLSRobustCluster2(CheckOLSRobustCluster, CheckOLSRobustNewMixin):
         self.rtolh = 1e-10
 
 
+class TestOLSRobustCluster2Input(CheckOLSRobustCluster, CheckOLSRobustNewMixin):
+    # compare with `reg cluster`
+
+    def setup(self):
+        import pandas as pd
+        fat_array = self.groups.reshape(-1, 1)
+        fat_groups = pd.DataFrame(fat_array)
+
+        res_ols = self.res1.get_robustcov_results('cluster',
+                                                  groups=fat_groups,
+                                                  use_correction=True,
+                                                  use_t=True)
+        self.res3 = self.res1
+        self.res1 = res_ols
+        self.bse_robust = res_ols.bse
+        self.cov_robust = res_ols.cov_params()
+        cov1 = sw.cov_cluster(self.res1, self.groups, use_correction=True)
+        se1 =  sw.se_cov(cov1)
+        self.bse_robust2 = se1
+        self.cov_robust2 = cov1
+        self.small = True
+        self.res2 = res2.results_cluster
+
+        self.rtol = 1e-6
+        self.rtolh = 1e-10
+
+    def test_too_many_groups(self):
+        long_groups = self.groups.reshape(-1, 1)
+        groups3 = np.hstack((long_groups, long_groups, long_groups))
+        assert_raises(ValueError, self.res1.get_robustcov_results,'cluster',
+                      groups=groups3, use_correction=True, use_t=True)
+
+    def test_2way_dataframe(self):
+        import pandas as pd
+        long_groups = self.groups.reshape(-1, 1)
+        groups2 = pd.DataFrame(np.hstack((long_groups, long_groups)))
+        res = self.res1.get_robustcov_results(
+            'cluster', groups=groups2, use_correction=True, use_t=True)
+
 class TestOLSRobustCluster2Fit(CheckOLSRobustCluster, CheckOLSRobustNewMixin):
     # copy, past uses fit method
     # compare with `reg cluster`
@@ -637,7 +678,7 @@ class CheckWLSRobustCluster(CheckOLSRobust):
 
 
 # not available yet for WLS
-class T_estWLSRobustCluster2(CheckWLSRobustCluster, CheckOLSRobustNewMixin):
+class TestWLSRobustCluster2(CheckWLSRobustCluster, CheckOLSRobustNewMixin):
     # compare with `reg cluster`
 
     def setup(self):
@@ -661,7 +702,7 @@ class T_estWLSRobustCluster2(CheckWLSRobustCluster, CheckOLSRobustNewMixin):
 
 
 # not available yet for WLS
-class T_estWLSRobustCluster2Large(CheckWLSRobustCluster, CheckOLSRobustNewMixin):
+class TestWLSRobustCluster2Large(CheckWLSRobustCluster, CheckOLSRobustNewMixin):
     # compare with `reg cluster`
 
     def setup(self):
@@ -744,10 +785,11 @@ class TestWLSOLSRobustSmall(object):
                    ('HC2', dict(use_t=True)),
                    ('HC3', dict(use_t=True))]
 
-        # fvalue are not the same
+        # fvalue are not the same, see #1212
         #res_ols = self.res_ols
         #res_wls = self.res_wls
         #assert_allclose(res_ols.fvalue, res_wls.fvalue, rtol=1e-13)
+        #assert_allclose(res_ols.f_pvalue, res_wls.f_pvalue, rtol=1e-13)
 
         for cov_type, kwds in all_cov:
             res1 = self.res_ols.get_robustcov_results(cov_type, **kwds)
@@ -759,9 +801,65 @@ class TestWLSOLSRobustSmall(object):
             #Note: Fvalue doesn't match up, difference in calculation ?
             #      The only difference should be in the constant detection
             #assert_allclose(res1.fvalue, res2.fvalue, rtol=1e-13)
-            #assert_allclose(res1.f_value, res2.f_pvalue, rtol=1e-13)
+            #assert_allclose(res1.f_pvalue, res2.f_pvalue, rtol=1e-13)
             mat = np.eye(len(res1.params))
             ft1 = res1.f_test(mat)
             ft2 = res2.f_test(mat)
             assert_allclose(ft1.fvalue, ft2.fvalue, rtol=1e-13)
             assert_allclose(ft1.pvalue, ft2.pvalue, rtol=1e-12)
+
+    def test_fixed_scale(self):
+        cov_type = 'fixed_scale'
+        kwds = {}
+        res1 = self.res_ols.get_robustcov_results(cov_type, **kwds)
+        res2 = self.res_wls.get_robustcov_results(cov_type, **kwds)
+        assert_allclose(res1.params, res2.params, rtol=1e-13)
+        assert_allclose(res1.cov_params(), res2.cov_params(), rtol=1e-13)
+        assert_allclose(res1.bse, res2.bse, rtol=1e-13)
+        assert_allclose(res1.pvalues, res2.pvalues, rtol=1e-12)
+
+        tt = res2.t_test(np.eye(len(res2.params)),
+                         cov_p=res2.normalized_cov_params)
+        assert_allclose(res2.cov_params(), res2.normalized_cov_params,
+                        rtol=1e-13)
+        assert_allclose(res2.bse, tt.sd, rtol=1e-13)
+        assert_allclose(res2.pvalues, tt.pvalue, rtol=1e-13)
+        assert_allclose(res2.tvalues, tt.tvalue, rtol=1e-13)
+
+        # using cov_type in fit
+        mod = self.res_wls.model
+        mod3 = WLS(mod.endog, mod.exog, weights=mod.weights)
+        res3 = mod3.fit(cov_type=cov_type, cov_kwds=kwds)
+        tt = res3.t_test(np.eye(len(res3.params)),
+                         cov_p=res3.normalized_cov_params)
+        assert_allclose(res3.cov_params(), res3.normalized_cov_params,
+                        rtol=1e-13)
+        assert_allclose(res3.bse, tt.sd, rtol=1e-13)
+        assert_allclose(res3.pvalues, tt.pvalue, rtol=1e-13)
+        assert_allclose(res3.tvalues, tt.tvalue, rtol=1e-13)
+
+
+def test_cov_type_fixed_scale():
+    # this is a unit test from scipy curvefit for `absolute_sigma` keyword
+    xdata = np.array([0, 1, 2, 3, 4, 5])
+    ydata = np.array([1, 1, 5, 7, 8, 12])
+    sigma = np.array([1, 2, 1, 2, 1, 2])
+
+    xdata = np.column_stack((xdata, np.ones(len(xdata))))
+    weights = 1. / sigma**2
+
+    res = WLS(ydata, xdata, weights=weights).fit()
+    assert_allclose(res.bse, [0.20659803, 0.57204404], rtol=1e-3)
+
+    res = WLS(ydata, xdata, weights=weights).fit()
+    assert_allclose(res.bse, [0.20659803, 0.57204404], rtol=1e-3)
+
+    res = WLS(ydata, xdata, weights=weights).fit(cov_type='fixed scale')
+    assert_allclose(res.bse, [0.30714756, 0.85045308], rtol=1e-3)
+
+    res = WLS(ydata, xdata, weights=weights / 9.).fit(cov_type='fixed scale')
+    assert_allclose(res.bse, [3*0.30714756, 3*0.85045308], rtol=1e-3)
+
+    res = WLS(ydata, xdata, weights=weights).fit(cov_type='fixed scale',
+                                                  cov_kwds={'scale':9})
+    assert_allclose(res.bse, [3*0.30714756, 3*0.85045308], rtol=1e-3)

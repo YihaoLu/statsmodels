@@ -50,9 +50,17 @@ def test_ywcoef():
     assert_array_almost_equal(mlywar.arcoef1000[1:],
                     -sm.regression.yule_walker(x1000, 20, method='mle')[0], 8)
 
+
+def test_yule_walker_inter():
+    # see 1869
+    x = np.array([1, -1, 2, 2, 0, -2, 1, 0, -3, 0, 0])
+    # it works
+    result = sm.regression.yule_walker(x, 3)
+
+
 def test_duplication_matrix():
     for k in range(2, 10):
-        m = tools.unvech(np.random.randn(k * (k + 1) / 2))
+        m = tools.unvech(np.random.randn(k * (k + 1) // 2))
         Dk = tools.duplication_matrix(k)
         assert(np.array_equal(vec(m), np.dot(Dk, vech(m))))
 
@@ -204,6 +212,15 @@ def test_freq_to_period():
     for i, j in zip(freqs, expected):
         assert_equal(tools.freq_to_period(i), j)
         assert_equal(tools.freq_to_period(to_offset(i)), j)
+
+def test_detrend():
+    data = np.arange(5)
+    assert_array_almost_equal(sm.tsa.detrend(data,order=1),np.zeros_like(data))
+    assert_array_almost_equal(sm.tsa.detrend(data,order=0),[-2,-1,0,1,2])
+    data = np.arange(10).reshape(5,2)
+    assert_array_almost_equal(sm.tsa.detrend(data,order=1,axis=0),np.zeros_like(data))
+    assert_array_almost_equal(sm.tsa.detrend(data,order=0,axis=0),[[-4, -4], [-2, -2], [0, 0], [2, 2], [4, 4]])
+    assert_array_almost_equal(sm.tsa.detrend(data,order=0,axis=1),[[-0.5, 0.5], [-0.5, 0.5], [-0.5, 0.5], [-0.5, 0.5], [-0.5, 0.5]])
 
 if __name__ == '__main__':
     #running them directly

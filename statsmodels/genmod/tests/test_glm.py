@@ -7,7 +7,7 @@ from statsmodels.compat import range
 import os
 import numpy as np
 from numpy.testing import (assert_almost_equal, assert_equal, assert_raises,
-                           assert_allclose, assert_, assert_array_less)
+                           assert_allclose, assert_, assert_array_less, dec)
 from scipy import stats
 import statsmodels.api as sm
 from statsmodels.genmod.generalized_linear_model import GLM
@@ -15,6 +15,7 @@ from statsmodels.tools.tools import add_constant
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
 from statsmodels.discrete import discrete_model as discrete
 from nose import SkipTest
+import warnings
 
 # Test Precisions
 DECIMAL_4 = 4
@@ -22,6 +23,31 @@ DECIMAL_3 = 3
 DECIMAL_2 = 2
 DECIMAL_1 = 1
 DECIMAL_0 = 0
+
+try:
+    import matplotlib.pyplot as plt  #makes plt available for test functions
+    have_matplotlib = True
+except:
+    have_matplotlib = False
+
+pdf_output = False
+
+if pdf_output:
+    from matplotlib.backends.backend_pdf import PdfPages
+    pdf = PdfPages("test_glm.pdf")
+else:
+    pdf = None
+
+def close_or_save(pdf, fig):
+    if pdf_output:
+        pdf.savefig(fig)
+    plt.close(fig)
+
+def teardown_module():
+    if have_matplotlib:
+        plt.close('all')
+        if pdf_output:
+            pdf.close()
 
 class CheckModelResultsMixin(object):
     '''
@@ -121,6 +147,11 @@ class CheckModelResultsMixin(object):
         assert_almost_equal(self.res1.pvalues, pvalues)
         assert_almost_equal(self.res1.conf_int(), conf_int)
 
+    def test_summary(self):
+        #SMOKE test
+        self.res1.summary()
+        self.res1.summary2()
+
 
 class CheckComparisonMixin(object):
 
@@ -130,7 +161,7 @@ class CheckComparisonMixin(object):
 
         assert_allclose(res1.llf, resd.llf, rtol=1e-10)
         score_obs1 = res1.model.score_obs(res1.params)
-        score_obsd = resd.model.jac(resd.params)
+        score_obsd = resd.model.score_obs(resd.params)
         assert_allclose(score_obs1, score_obsd, rtol=1e-10)
 
         # score
@@ -195,7 +226,7 @@ class TestGlmGaussian(CheckModelResultsMixin):
         self.resd = resd  # attach to access from the outside
 
         assert_allclose(res1.llf, resd.llf, rtol=1e-10)
-        score_obs1 = res1.model.score_obs(res1.params)
+        score_obs1 = res1.model.score_obs(res1.params, scale=None)
         score_obsd = resd.resid[:, None] / resd.scale * resd.model.exog
         # low precision because of badly scaled exog
         assert_allclose(score_obs1, score_obsd, rtol=1e-8)
@@ -203,6 +234,11 @@ class TestGlmGaussian(CheckModelResultsMixin):
         score_obs1 = res1.model.score_obs(res1.params, scale=1)
         score_obsd = resd.resid[:, None] * resd.model.exog
         assert_allclose(score_obs1, score_obsd, rtol=1e-8)
+
+        hess_obs1 = res1.model.hessian(res1.params, scale=None)
+        hess_obsd = -1. / resd.scale * resd.model.exog.T.dot(resd.model.exog)
+        # low precision because of badly scaled exog
+        assert_allclose(hess_obs1, hess_obsd, rtol=1e-8)
 
 #    def setup(self):
 #        if skipR:
@@ -323,7 +359,7 @@ class TestGlmBernoulli(CheckModelResultsMixin, CheckComparisonMixin):
                 family=sm.families.Binomial()).fit()
 
         modd = discrete.Logit(self.res2.endog, self.res2.exog)
-        self.resd = modd.fit(start_params=self.res1.params * 0.9)
+        self.resd = modd.fit(start_params=self.res1.params * 0.9, disp=False)
 
 
     def score_test_r(self):
@@ -401,8 +437,10 @@ class TestGlmGamma(CheckModelResultsMixin):
         from .results.results_glm import Scotvote
         data = load()
         data.exog = add_constant(data.exog, prepend=False)
-        res1 = GLM(data.endog, data.exog, \
-                    family=sm.families.Gamma()).fit()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res1 = GLM(data.endog, data.exog,
+                       family=sm.families.Gamma()).fit()
         self.res1 = res1
 #        res2 = RModel(data.endog, data.exog, r.glm, family=r.Gamma)
         res2 = Scotvote()
@@ -440,8 +478,10 @@ class TestGlmGammaIdentity(CheckModelResultsMixin):
 
         from .results.results_glm import CancerIdentity
         res2 = CancerIdentity()
-        self.res1 = GLM(res2.endog, res2.exog,
-            family=sm.families.Gamma(link=sm.families.links.identity)).fit()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.res1 = GLM(res2.endog, res2.exog,
+                            family=sm.families.Gamma(link=sm.families.links.identity)).fit()
         self.res2 = res2
 
 #    def setup(self):
@@ -468,7 +508,7 @@ class TestGlmPoisson(CheckModelResultsMixin, CheckComparisonMixin):
         self.res2 = Cpunish()
         # compare with discrete, start close to save time
         modd = discrete.Poisson(self.data.endog, self.data.exog)
-        self.resd = modd.fit(start_params=self.res1.params * 0.9)
+        self.resd = modd.fit(start_params=self.res1.params * 0.9, disp=False)
 
 #class TestGlmPoissonIdentity(CheckModelResultsMixin):
 #    pass
@@ -528,9 +568,11 @@ class TestGlmInvgaussIdentity(CheckModelResultsMixin):
 
         from .results.results_glm import Medpar1
         data = Medpar1()
-        self.res1 = GLM(data.endog, data.exog,
-            family=sm.families.InverseGaussian(link=\
-            sm.families.links.identity)).fit()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.res1 = GLM(data.endog, data.exog,
+                            family=sm.families.InverseGaussian(
+                                link=sm.families.links.identity)).fit()
         from .results.results_glm import InvGaussIdentity
         self.res2 = InvGaussIdentity()
 
@@ -622,6 +664,16 @@ class TestGlmPoissonOffset(CheckModelResultsMixin):
         mod2 = GLM(endog, exog, family=sm.families.Poisson(),
                    offset=offset2).fit()
         assert_almost_equal(mod1.params, mod2.params)
+
+        # test recreating model
+        mod1_ = mod1.model
+        kwds = mod1_._get_init_kwds()
+        assert_allclose(kwds['exposure'], exposure, rtol=1e-14)
+        assert_allclose(kwds['offset'], mod1_.offset, rtol=1e-14)
+        mod3 = mod1_.__class__(mod1_.endog, mod1_.exog, **kwds)
+        assert_allclose(mod3.exposure, mod1_.exposure, rtol=1e-14)
+        assert_allclose(mod3.offset, mod1_.offset, rtol=1e-14)
+
 
     def test_predict(self):
         np.random.seed(382304)
@@ -756,6 +808,218 @@ def test_loglike_no_opt():
         res = mod.fit(start_params=params, maxiter=0)
         like = llf(params)
         assert_almost_equal(like, res.llf)
+
+
+def test_formula_missing_exposure():
+    # see 2083
+    import statsmodels.formula.api as smf
+    import pandas as pd
+
+    d = {'Foo': [1, 2, 10, 149], 'Bar': [1, 2, 3, np.nan],
+         'constant': [1] * 4, 'exposure' : np.random.uniform(size=4),
+         'x': [1, 3, 2, 1.5]}
+    df = pd.DataFrame(d)
+
+    family = sm.families.Gaussian(link=sm.families.links.log)
+
+    mod = smf.glm("Foo ~ Bar", data=df, exposure=df.exposure,
+                  family=family)
+    assert_(type(mod.exposure) is np.ndarray, msg='Exposure is not ndarray')
+
+    exposure = pd.Series(np.random.uniform(size=5))
+    assert_raises(ValueError, smf.glm, "Foo ~ Bar", data=df,
+                  exposure=exposure, family=family)
+    assert_raises(ValueError, GLM, df.Foo, df[['constant', 'Bar']],
+                  exposure=exposure, family=family)
+
+
+@dec.skipif(not have_matplotlib)
+def test_plots():
+
+    np.random.seed(378)
+    n = 200
+    exog = np.random.normal(size=(n, 2))
+    lin_pred = exog[:, 0] + exog[:, 1]**2
+    prob = 1 / (1 + np.exp(-lin_pred))
+    endog = 1 * (np.random.uniform(size=n) < prob)
+
+    model = sm.GLM(endog, exog, family=sm.families.Binomial())
+    result = model.fit()
+
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    from statsmodels.graphics.regressionplots import add_lowess
+
+    # array interface
+    for j in 0,1:
+        fig = result.plot_added_variable(j)
+        add_lowess(fig.axes[0], frac=0.5)
+        close_or_save(pdf, fig)
+        fig = result.plot_partial_residuals(j)
+        add_lowess(fig.axes[0], frac=0.5)
+        close_or_save(pdf, fig)
+        fig = result.plot_ceres_residuals(j)
+        add_lowess(fig.axes[0], frac=0.5)
+        close_or_save(pdf, fig)
+
+    # formula interface
+    data = pd.DataFrame({"y": endog, "x1": exog[:, 0], "x2": exog[:, 1]})
+    model = sm.GLM.from_formula("y ~ x1 + x2", data, family=sm.families.Binomial())
+    result = model.fit()
+    for j in 0,1:
+        xname = ["x1", "x2"][j]
+        fig = result.plot_added_variable(xname)
+        add_lowess(fig.axes[0], frac=0.5)
+        close_or_save(pdf, fig)
+        fig = result.plot_partial_residuals(xname)
+        add_lowess(fig.axes[0], frac=0.5)
+        close_or_save(pdf, fig)
+        fig = result.plot_ceres_residuals(xname)
+        add_lowess(fig.axes[0], frac=0.5)
+        close_or_save(pdf, fig)
+
+def gen_endog(lin_pred, family_class, link, binom_version=0):
+
+    np.random.seed(872)
+
+    fam = sm.families
+
+    mu = link().inverse(lin_pred)
+
+    if family_class == fam.Binomial:
+        if binom_version == 0:
+            endog = 1*(np.random.uniform(size=len(lin_pred)) < mu)
+        else:
+            endog = np.empty((len(lin_pred), 2))
+            n = 10
+            endog[:, 0] = (np.random.uniform(size=(len(lin_pred), n)) < mu[:, None]).sum(1)
+            endog[:, 1] = n - endog[:, 0]
+    elif family_class == fam.Poisson:
+        endog = np.random.poisson(mu)
+    elif family_class == fam.Gamma:
+        endog = np.random.gamma(2, mu)
+    elif family_class == fam.Gaussian:
+        endog = mu + np.random.normal(size=len(lin_pred))
+    elif family_class == fam.NegativeBinomial:
+        from scipy.stats.distributions import nbinom
+        endog = nbinom.rvs(mu, 0.5)
+    elif family_class == fam.InverseGaussian:
+        from scipy.stats.distributions import invgauss
+        endog = invgauss.rvs(mu)
+    else:
+        raise ValueError
+
+    return endog
+
+
+def test_summary():
+    """
+    Smoke test for summary.
+    """
+
+    np.random.seed(4323)
+
+    n = 100
+    exog = np.random.normal(size=(n, 2))
+    exog[:, 0] = 1
+    endog = np.random.normal(size=n)
+
+    for method in "irls", "cg":
+        fa = sm.families.Gaussian()
+        model = sm.GLM(endog, exog, family=fa)
+        rslt = model.fit(method=method)
+        s = rslt.summary()
+
+def test_gradient_irls():
+    """
+    Compare the results when using gradient optimization and IRLS.
+    """
+
+    # TODO: Find working examples for inverse_squared link
+
+    np.random.seed(87342)
+
+    fam = sm.families
+    lnk = sm.families.links
+    families = [(fam.Binomial, [lnk.logit, lnk.probit, lnk.cloglog, lnk.log, lnk.cauchy]),
+                (fam.Poisson, [lnk.log, lnk.identity, lnk.sqrt]),
+                (fam.Gamma, [lnk.log, lnk.identity, lnk.inverse_power]),
+                (fam.Gaussian, [lnk.identity, lnk.log, lnk.inverse_power]),
+                (fam.InverseGaussian, [lnk.log, lnk.identity, lnk.inverse_power, lnk.inverse_squared]),
+                (fam.NegativeBinomial, [lnk.log, lnk.inverse_power, lnk.inverse_squared, lnk.identity])]
+
+    n = 100
+    p = 3
+    exog = np.random.normal(size=(n, p))
+    exog[:, 0] = 1
+
+    for family_class, family_links in families:
+       for link in family_links:
+           for binom_version in 0,1:
+
+               if family_class != fam.Binomial and binom_version == 1:
+                   continue
+
+               if (family_class, link) == (fam.Poisson, lnk.identity):
+                   lin_pred = 20 + exog.sum(1)
+               elif (family_class, link) == (fam.Binomial, lnk.log):
+                   lin_pred = -1 + exog.sum(1) / 8
+               elif (family_class, link) == (fam.Poisson, lnk.sqrt):
+                   lin_pred = 2 + exog.sum(1)
+               elif (family_class, link) == (fam.InverseGaussian, lnk.log):
+                   lin_pred = -1 + exog.sum(1)
+               elif (family_class, link) == (fam.InverseGaussian, lnk.identity):
+                   lin_pred = 20 + 5*exog.sum(1)
+                   lin_pred = np.clip(lin_pred, 1e-4, np.inf)
+               elif (family_class, link) == (fam.InverseGaussian, lnk.inverse_squared):
+                   lin_pred = 0.5 + exog.sum(1) / 5
+                   continue # skip due to non-convergence
+               elif (family_class, link) == (fam.InverseGaussian, lnk.inverse_power):
+                   lin_pred = 1 + exog.sum(1) / 5
+               elif (family_class, link) == (fam.NegativeBinomial, lnk.identity):
+                   lin_pred = 20 + 5*exog.sum(1)
+                   lin_pred = np.clip(lin_pred, 1e-4, np.inf)
+               elif (family_class, link) == (fam.NegativeBinomial, lnk.inverse_squared):
+                   lin_pred = 0.1 + np.random.uniform(size=exog.shape[0])
+                   continue # skip due to non-convergence
+               elif (family_class, link) == (fam.NegativeBinomial, lnk.inverse_power):
+                   lin_pred = 1 + exog.sum(1) / 5
+               else:
+                   lin_pred = np.random.uniform(size=exog.shape[0])
+
+               endog = gen_endog(lin_pred, family_class, link, binom_version)
+
+               with warnings.catch_warnings():
+                   warnings.simplefilter("ignore")
+                   mod_irls = sm.GLM(endog, exog, family=family_class(link=link))
+               rslt_irls = mod_irls.fit(method="IRLS")
+
+               # Try with and without starting values.
+               for max_start_irls, start_params in (0, rslt_irls.params), (1, None):
+
+                   with warnings.catch_warnings():
+                       warnings.simplefilter("ignore")
+                       mod_gradient = sm.GLM(endog, exog, family=family_class(link=link))
+                   rslt_gradient = mod_gradient.fit(max_start_irls=max_start_irls,
+                                                    start_params=start_params,
+                                                    method="newton")
+
+                   assert_allclose(rslt_gradient.params,
+                                   rslt_irls.params, rtol=1e-6, atol=1e-6)
+
+                   assert_allclose(rslt_gradient.llf, rslt_irls.llf,
+                                   rtol=1e-6, atol=1e-6)
+
+                   assert_allclose(rslt_gradient.scale, rslt_irls.scale,
+                                   rtol=1e-6, atol=1e-6)
+
+                   # Get the standard errors using expected information.
+                   gradient_bse = rslt_gradient.bse
+                   ehess = mod_gradient.hessian(rslt_gradient.params, observed=False)
+                   gradient_bse = np.sqrt(-np.diag(np.linalg.inv(ehess)))
+
+                   assert_allclose(gradient_bse, rslt_irls.bse, rtol=1e-6, atol=1e-6)
+
 
 if __name__=="__main__":
     #run_module_suite()

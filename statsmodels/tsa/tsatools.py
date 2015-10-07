@@ -6,7 +6,7 @@ from pandas.tseries import offsets
 from pandas.tseries.frequencies import to_offset
 
 
-def add_trend(X, trend="c", prepend=False):
+def add_trend(X, trend="c", prepend=False, has_constant='skip'):
     """
     Adds a trend and/or constant to an array.
 
@@ -21,11 +21,16 @@ def add_trend(X, trend="c", prepend=False):
         "ctt" add constant and linear and quadratic trend.
     prepend : bool
         If True, prepends the new data to the columns of X.
+    has_constant : str {'raise', 'add', 'skip'}
+        Controls what happens when trend is 'c' and a constant already
+        exists in X. 'raise' will raise an error. 'add' will duplicate a
+        constant. 'skip' will return the data without change. 'skip' is the
+        default.
 
     Notes
     -----
-    Returns columns as ["ctt","ct","c"] whenever applicable.  There is currently
-    no checking for an existing constant or trend.
+    Returns columns as ["ctt","ct","c"] whenever applicable. There is currently
+    no checking for an existing trend.
 
     See also
     --------
@@ -34,13 +39,14 @@ def add_trend(X, trend="c", prepend=False):
     #TODO: could be generalized for trend of aribitrary order
     trend = trend.lower()
     if trend == "c":    # handles structured arrays
-        return add_constant(X, prepend=prepend)
+        return add_constant(X, prepend=prepend, has_constant=has_constant)
     elif trend == "ct" or trend == "t":
         trendorder = 1
     elif trend == "ctt":
         trendorder = 2
     else:
         raise ValueError("trend %s not understood" % trend)
+
     X = np.asanyarray(X)
     nobs = len(X)
     trendarr = np.vander(np.arange(1,nobs+1, dtype=float), trendorder+1)
@@ -49,6 +55,15 @@ def add_trend(X, trend="c", prepend=False):
     if trend == "t":
         trendarr = trendarr[:,1]
     if not X.dtype.names:
+        # check for constant
+        if "c" in trend and np.any(np.ptp(X, axis=0) == 0):
+            if has_constant == 'raise':
+                raise ValueError("X already contains a constant")
+            elif has_constant == 'add':
+                pass
+            elif has_constant == 'skip' and trend == "ct":
+                trendarr = trendarr[:, 1]
+
         if not prepend:
             X = np.column_stack((X, trendarr))
         else:
@@ -65,10 +80,10 @@ def add_trend(X, trend="c", prepend=False):
         trendarr = trendarr.view(dt)
         if prepend:
             X = nprf.append_fields(trendarr, X.dtype.names, [X[i] for i
-                in data.dtype.names], usemask=False, asrecarray=return_rec)
+                in X.dtype.names], usemask=False, asrecarray=return_rec)
         else:
             X = nprf.append_fields(X, trendarr.dtype.names, [trendarr[i] for i
-                in trendarr.dtype.names], usemask=false, asrecarray=return_rec)
+                in trendarr.dtype.names], usemask=False, asrecarray=return_rec)
     return X
 
 def add_lag(x, col=None, lags=1, drop=False, insert=True):
@@ -213,7 +228,7 @@ def detrend(x, order=1, axis=0):
         specifies the polynomial order of the trend, zero is constant, one is
         linear trend, two is quadratic trend
     axis : int
-        for detrending with order > 0, axis can be either 0 observations by rows,
+        axis can be either 0, observations by rows,
         or 1, observations by columns
 
     Returns
@@ -227,7 +242,7 @@ def detrend(x, order=1, axis=0):
     x = np.asarray(x)
     nobs = x.shape[0]
     if order == 0:
-        return x - np.expand_dims(x.mean(ax), x)
+        return x - np.expand_dims(x.mean(axis), axis)
     else:
         if x.ndim == 2 and lrange(2)[axis]==1:
             x = x.T
@@ -426,7 +441,7 @@ def duplication_matrix(n):
     -------
     D_n : ndarray
     """
-    tmp = np.eye(n * (n + 1) / 2)
+    tmp = np.eye(n * (n + 1) // 2)
     return np.array([unvech(x).ravel() for x in tmp]).T
 
 def elimination_matrix(n):
@@ -547,6 +562,32 @@ def _ma_invtransparams(macoefs):
     invmacoefs = -np.log((1-macoefs)/(1+macoefs))
     return invmacoefs
 
+
+def unintegrate_levels(x, d):
+    """
+    Returns the successive differences needed to unintegrate the series.
+
+    Parameters
+    ----------
+    x : array-like
+        The original series
+    d : int
+        The number of differences of the differenced series.
+
+    Returns
+    -------
+    y : array-like
+        The increasing differences from 0 to d-1 of the first d elements
+        of x.
+
+    See Also
+    --------
+    unintegrate
+    """
+    x = x[:d]
+    return np.asarray([np.diff(x, d - i)[0] for i in range(d, 0, -1)])
+
+
 def unintegrate(x, levels):
     """
     After taking n-differences of a series, return the original series
@@ -567,14 +608,16 @@ def unintegrate(x, levels):
     Examples
     --------
     >>> x = np.array([1, 3, 9., 19, 8.])
-    >>> levels = [x[0], np.diff(x, 1)[0]]
-    >>> _unintegrate(np.diff(x, 2), levels)
+    >>> levels = unintegrate_levels(x, 2)
+    >>> levels
+    array([ 1.,  2.])
+    >>> unintegrate(np.diff(x, 2), levels)
     array([  1.,   3.,   9.,  19.,   8.])
     """
-    levels = levels[:] # copy
+    levels = list(levels)[:] # copy
     if len(levels) > 1:
         x0 = levels.pop(-1)
-        return _unintegrate(np.cumsum(np.r_[x0, x]), levels)
+        return unintegrate(np.cumsum(np.r_[x0, x]), levels)
     x0 = levels[0]
     return np.cumsum(np.r_[x0, x])
 

@@ -6,7 +6,7 @@ from statsmodels.compat.python import long, lrange
 import warnings
 import pandas
 import numpy as np
-from numpy.testing import (assert_almost_equal, assert_approx_equal,
+from numpy.testing import (assert_almost_equal, assert_approx_equal, assert_,
                             assert_raises, assert_equal, assert_allclose)
 from scipy.linalg import toeplitz
 from statsmodels.tools.tools import add_constant, categorical
@@ -951,16 +951,16 @@ def test_summary():
 \\textbf{Df Model:}         &           6      & \\textbf{                     } &             \\\\
 \\bottomrule
 \\end{tabular}
-\\begin{tabular}{lccccc}
-                  & \\textbf{coef} & \\textbf{std err} & \\textbf{t} & \\textbf{P$>$$|$t$|$} & \\textbf{[95.0\\% Conf. Int.]}  \\\\
+\\begin{tabular}{lcccccc}
+                  & \\textbf{coef} & \\textbf{std err} & \\textbf{t} & \\textbf{P$>$$|$t$|$} & \\textbf{[0.025} & \\textbf{0.975]}  \\\\
 \\midrule
-\\textbf{GNPDEFL}  &      15.0619  &       84.915     &     0.177  &         0.863        &      -177.029   207.153       \\\\
-\\textbf{GNP}      &      -0.0358  &        0.033     &    -1.070  &         0.313        &        -0.112     0.040       \\\\
-\\textbf{UNEMP}    &      -2.0202  &        0.488     &    -4.136  &         0.003        &        -3.125    -0.915       \\\\
-\\textbf{ARMED}    &      -1.0332  &        0.214     &    -4.822  &         0.001        &        -1.518    -0.549       \\\\
-\\textbf{POP}      &      -0.0511  &        0.226     &    -0.226  &         0.826        &        -0.563     0.460       \\\\
-\\textbf{YEAR}     &    1829.1515  &      455.478     &     4.016  &         0.003        &       798.788  2859.515       \\\\
-\\textbf{constant} &   -3.482e+06  &      8.9e+05     &    -3.911  &         0.004        &      -5.5e+06 -1.47e+06       \\\\
+\\textbf{GNPDEFL}  &      15.0619  &       84.915     &     0.177  &         0.863        &     -177.029    &      207.153     \\\\
+\\textbf{GNP}      &      -0.0358  &        0.033     &    -1.070  &         0.313        &       -0.112    &        0.040     \\\\
+\\textbf{UNEMP}    &      -2.0202  &        0.488     &    -4.136  &         0.003        &       -3.125    &       -0.915     \\\\
+\\textbf{ARMED}    &      -1.0332  &        0.214     &    -4.822  &         0.001        &       -1.518    &       -0.549     \\\\
+\\textbf{POP}      &      -0.0511  &        0.226     &    -0.226  &         0.826        &       -0.563    &        0.460     \\\\
+\\textbf{YEAR}     &    1829.1515  &      455.478     &     4.016  &         0.003        &      798.788    &     2859.515     \\\\
+\\textbf{constant} &   -3.482e+06  &      8.9e+05     &    -3.911  &         0.004        &     -5.5e+06    &    -1.47e+06     \\\\
 \\bottomrule
 \\end{tabular}
 \\begin{tabular}{lclc}
@@ -975,6 +975,22 @@ def test_summary():
     assert_equal(table, expected)
 
 class TestRegularizedFit(object):
+
+    # Make sure there are no issues when there are no selected
+    # variables.
+    def test_empty_model(self):
+
+       np.random.seed(742)
+       n = 100
+       endog = np.random.normal(size=n)
+       exog = np.random.normal(size=(n, 3))
+
+       model = OLS(endog, exog)
+       result = model.fit_regularized(alpha=1000)
+
+       assert_equal(result.params, 0.)
+       assert_equal(result.bse, 0.)
+
 
     def test_regularized(self):
 
@@ -997,8 +1013,8 @@ class TestRegularizedFit(object):
             lam = float(vec[3])
             params = vec[4:].astype(np.float64)
 
-            endog = data[0:n, 0]
-            exog = data[0:n, 1:(p+1)]
+            endog = data[0:int(n), 0]
+            exog = data[0:int(n), 1:(int(p)+1)]
 
             endog = endog - endog.mean()
             endog /= endog.std(ddof=1)
@@ -1011,6 +1027,67 @@ class TestRegularizedFit(object):
 
             # Smoke test for summary
             smry = rslt.summary()
+
+
+def test_formula_missing_cat():
+    # gh-805
+
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+    from patsy import PatsyError
+
+    dta = sm.datasets.grunfeld.load_pandas().data
+    dta.ix[0, 'firm'] = np.nan
+
+    mod = ols(formula='value ~ invest + capital + firm + year',
+              data=dta.dropna())
+    res = mod.fit()
+
+    mod2 = ols(formula='value ~ invest + capital + firm + year',
+               data=dta)
+    res2 = mod2.fit()
+
+    assert_almost_equal(res.params.values, res2.params.values)
+
+    assert_raises(PatsyError, ols, 'value ~ invest + capital + firm + year',
+                  data=dta, missing='raise')
+
+
+def test_missing_formula_predict():
+    # see 2171
+    nsample = 30
+
+    data = pandas.DataFrame({'x': np.linspace(0, 10, nsample)})
+    null = pandas.DataFrame({'x': np.array([np.nan])})
+    data = pandas.concat([data, null])
+    beta = np.array([1, 0.1])
+    e = np.random.normal(size=nsample+1)
+    data['y'] = beta[0] + beta[1] * data['x'] + e
+    model = OLS.from_formula('y ~ x', data=data)
+    fit = model.fit()
+    pred = fit.predict(exog=data[:-1])
+
+
+def test_fvalue_implicit_constant():
+    nobs = 100
+    np.random.seed(2)
+    x = np.random.randn(nobs, 1)
+    x = ((x > 0) == [True, False]).astype(int)
+    y = x.sum(1) + np.random.randn(nobs)
+    w = 1 + 0.25 * np.random.rand(nobs)
+
+    from statsmodels.regression.linear_model import OLS, WLS
+
+    res = OLS(y, x).fit(cov_type='HC1')
+    assert_(np.isnan(res.fvalue))
+    assert_(np.isnan(res.f_pvalue))
+    res.summary()
+
+    res = WLS(y, x).fit(cov_type='HC1')
+    assert_(np.isnan(res.fvalue))
+    assert_(np.isnan(res.f_pvalue))
+    res.summary()
+
 
 
 if __name__=="__main__":

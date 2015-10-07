@@ -20,6 +20,7 @@ import scipy.linalg as L
 
 from statsmodels.tools.decorators import cache_readonly
 from statsmodels.tools.tools import chain_dot
+from statsmodels.tools.linalg import logdet_symm
 from statsmodels.tsa.tsatools import vec, unvec
 
 from statsmodels.tsa.vector_ar.irf import IRAnalysis
@@ -263,7 +264,7 @@ def var_loglike(resid, omega, nobs):
         -\left(\frac{T}{2}\right)
         \left(\ln\left|\Omega\right|-K\ln\left(2\pi\right)-K\right)
     """
-    logdet = util.get_logdet(np.asarray(omega))
+    logdet = logdet_symm(np.asarray(omega))
     neqs = len(omega)
     part1 = - (nobs * neqs / 2) * np.log(2 * np.pi)
     part2 = - (nobs / 2) * (logdet + neqs)
@@ -320,8 +321,6 @@ class VAR(tsbase.TimeSeriesModel):
     ----------
     endog : array-like
         2-d endogenous response variable. The independent variable.
-    names : array-like
-        must match number of columns of endog
     dates : array-like
         must match number of rows of endog
 
@@ -329,18 +328,10 @@ class VAR(tsbase.TimeSeriesModel):
     ----------
     Lutkepohl (2005) New Introduction to Multiple Time Series Analysis
     """
-    def __init__(self, endog, dates=None, names=None, freq=None,
-            missing='none'):
+    def __init__(self, endog, dates=None, freq=None, missing='none'):
         super(VAR, self).__init__(endog, None, dates, freq, missing=missing)
         if self.endog.ndim == 1:
             raise ValueError("Only gave one variable to VAR")
-        if names is not None:
-            import warnings
-            warnings.warn("The names argument is deprecated and will be "
-                    "removed in the next release.", FutureWarning)
-            self.names = names
-        else:
-            self.names = self.endog_names
         self.y = self.endog #keep alias for now
         self.neqs = self.endog.shape[1]
 
@@ -371,7 +362,7 @@ class VAR(tsbase.TimeSeriesModel):
             predictedvalues += intercept
 
         y = self.y
-        X = util.get_var_endog(y, lags, trend=trend)
+        X = util.get_var_endog(y, lags, trend=trend, has_constant='raise')
         fittedvalues = np.dot(X, params)
 
         fv_start = start - k_ar
@@ -425,6 +416,9 @@ class VAR(tsbase.TimeSeriesModel):
         """
         lags = maxlags
 
+        if trend not in ['c', 'ct', 'ctt', 'nc']:
+            raise ValueError("trend '{}' not supported for VAR".format(trend))
+
         if ic is not None:
             selections = self.select_order(maxlags=maxlags, verbose=verbose)
             if ic not in selections:
@@ -460,7 +454,7 @@ class VAR(tsbase.TimeSeriesModel):
 
         y = self.y[offset:]
 
-        z = util.get_var_endog(y, lags, trend=trend)
+        z = util.get_var_endog(y, lags, trend=trend, has_constant='raise')
         y_sample = y[lags:]
 
         # Lutkepohl p75, about 5x faster than stated formula
@@ -856,15 +850,6 @@ class VARResults(VARProcess):
 
         super(VARResults, self).__init__(coefs, intercept, sigma_u, names=names)
 
-    @cache_readonly
-    def coef_names(self):
-        """Coefficient names (deprecated)
-        """
-        from warnings import warn
-        warn("coef_names is deprecated and will be removed in 0.6.0."
-             "Use exog_names", FutureWarning)
-        return self.exog_names
-
     def plot(self):
         """Plot input time series
         """
@@ -988,8 +973,8 @@ class VARResults(VARProcess):
         """
         Estimated covariance matrix of model coefficients ex intercept
         """
-        # drop intercept
-        return self.cov_params[self.neqs:, self.neqs:]
+        # drop intercept and trend
+        return self.cov_params[self.k_trend*self.neqs:, self.k_trend*self.neqs:]
 
     @cache_readonly
     def _cov_sigma(self):
@@ -1483,7 +1468,7 @@ class VARResults(VARProcess):
         lag_order = self.k_ar
         free_params = lag_order * neqs ** 2 + neqs * self.k_trend
 
-        ld = util.get_logdet(self.sigma_u_mle)
+        ld = logdet_symm(self.sigma_u_mle)
 
         # See Lutkepohl pp. 146-150
 
@@ -1558,7 +1543,7 @@ class FEVD(object):
 
         self.model = model
         self.neqs = model.neqs
-        self.names = model.names
+        self.names = model.model.endog_names
 
         self.irfobj = model.irf(var_decomp=P, periods=periods)
         self.orth_irfs = self.irfobj.orth_irfs

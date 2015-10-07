@@ -27,6 +27,11 @@
           "text": "Weighted Least Squares",
           "target": "notebooks/generated/wls.html",
           "img": "../_static/images/wls.png"
+        },
+        {
+          "text": "Linear Mixed-Effects",
+          "target": "notebooks/generated/mixed_lm_example.html",
+          "img": "../_static/images/mixed_lm.png"
         }
         ]
   },
@@ -138,6 +143,32 @@
             "img": "../_static/images/tsa_filters.png"
         }
           ]
+  },
+  {
+      "header":"State space models",
+      "id":"statespace",
+      "links":[
+        {
+            "text": "SARIMAX: Introduction",
+            "target": "notebooks/generated/statespace_sarimax_stata.html",
+            "img": "../_static/images/statespace_sarimax_stata.png"
+        },
+        {
+            "text": "SARIMAX: Model selection, missing data",
+            "target": "notebooks/generated/statespace_sarimax_internet.html",
+            "img": "../_static/images/statespace_sarimax_internet.png"
+        },
+        {
+            "text": "State space modeling: Local Linear Trends",
+            "target": "notebooks/generated/statespace_local_linear_trend.html",
+            "img": "../_static/images/statespace_local_linear_trend.png"
+        },
+        {
+            "text": "ARMA: Sunspots Data",
+            "target": "notebooks/generated/statespace_arma_0.html",
+            "img": "../_static/images/statespace_arma0.png"
+        }
+      ]
   },
   {
     "header":"User Notes",

@@ -22,6 +22,60 @@ http://www.mwsug.org/proceedings/2006/stats/MWSUG-2006-SD08.pdf
 """
 
 
+_predict_docstring = """
+    Returns predicted values from the proportional hazards
+    regression model.
+
+    Parameters
+    ----------
+    params : array-like
+        The proportional hazards model parameters.
+    exog : array-like
+        Data to use as `exog` in forming predictions.  If not
+        provided, the `exog` values from the model used to fit the
+        data are used.%(cov_params_doc)s
+    endog : array-like
+        Duration (time) values at which the predictions are made.
+        Only used if pred_type is either 'cumhaz' or 'surv'.  If
+        using model `exog`, defaults to model `endog` (time), but
+        may be provided explicitly to make predictions at
+        alternative times.
+    strata : array-like
+        A vector of stratum values used to form the predictions.
+        Not used (may be 'None') if pred_type is 'lhr' or 'hr'.
+        If `exog` is None, the model stratum values are used.  If
+        `exog` is not None and pred_type is 'surv' or 'cumhaz',
+        stratum values must be provided (unless there is only one
+        stratum).
+    offset : array-like
+        Offset values used to create the predicted values.
+    pred_type : string
+        If 'lhr', returns log hazard ratios, if 'hr' returns
+        hazard ratios, if 'surv' returns the survival function, if
+        'cumhaz' returns the cumulative hazard function.
+
+    Returns
+    -------
+    A bunch containing two fields: `predicted_values` and
+    `standard_errors`.
+
+    Notes
+    -----
+    Standard errors are only returned when predicting the log
+    hazard ratio (pred_type is 'lhr').
+
+    Types `surv` and `cumhaz` require estimation of the cumulative
+    hazard function.
+"""
+
+_predict_cov_params_docstring = """
+    cov_params : array-like
+        The covariance matrix of the estimated `params` vector,
+        used to obtain prediction errors if pred_type='lhr',
+        otherwise optional."""
+
+
+
 class PHSurvivalTime(object):
 
     def __init__(self, time, status, exog, strata=None, entry=None,
@@ -211,8 +265,8 @@ class PHReg(model.LikelihoodModel):
     Fit the Cox proportional hazards regression model for right
     censored data.
 
-    Arguments
-    ---------
+    Parameters
+    ----------
     endog : array-like
         The observed times (event or censoring)
     exog : 2D array-like
@@ -247,7 +301,7 @@ class PHReg(model.LikelihoodModel):
 
     def __init__(self, endog, exog, status=None, entry=None,
                  strata=None, offset=None, ties='breslow',
-                 missing='drop'):
+                 missing='drop', **kwargs):
 
         # Default is no censoring
         if status is None:
@@ -255,7 +309,8 @@ class PHReg(model.LikelihoodModel):
 
         super(PHReg, self).__init__(endog, exog, status=status,
                                     entry=entry, strata=strata,
-                                    offset=offset, missing=missing)
+                                    offset=offset, missing=missing,
+                                    **kwargs)
 
         # endog and exog are automatically converted, but these are
         # not
@@ -281,6 +336,73 @@ class PHReg(model.LikelihoodModel):
                              "`breslow`")
 
         self.ties = ties
+
+    @classmethod
+    def from_formula(cls, formula, data, status=None, entry=None,
+                     strata=None, offset=None, subset=None,
+                     ties='breslow', missing='drop', *args, **kwargs):
+        """
+        Create a proportional hazards regression model from a formula
+        and dataframe.
+
+        Parameters
+        ----------
+        formula : str or generic Formula object
+            The formula specifying the model
+        data : array-like
+            The data for the model. See Notes.
+        status : array-like
+            The censoring status values; status=1 indicates that an
+            event occured (e.g. failure or death), status=0 indicates
+            that the observation was right censored. If None, defaults
+            to status=1 for all cases.
+        entry : array-like
+            The entry times, if left truncation occurs
+        strata : array-like
+            Stratum labels.  If None, all observations are taken to be
+            in a single stratum.
+        offset : array-like
+            Array of offset values
+        subset : array-like
+            An array-like object of booleans, integers, or index
+            values that indicate the subset of df to use in the
+            model. Assumes df is a `pandas.DataFrame`
+        ties : string
+            The method used to handle tied times, must be either 'breslow'
+            or 'efron'.
+        missing : string
+            The method used to handle missing data
+        args : extra arguments
+            These are passed to the model
+        kwargs : extra keyword arguments
+            These are passed to the model with one exception. The
+            ``eval_env`` keyword is passed to patsy. It can be either a
+            :class:`patsy:patsy.EvalEnvironment` object or an integer
+            indicating the depth of the namespace to use. For example, the
+            default ``eval_env=0`` uses the calling namespace. If you wish
+            to use a "clean" environment set ``eval_env=-1``.
+
+        Returns
+        -------
+        model : PHReg model instance
+        """
+
+        # Allow array arguments to be passed by column name.
+        if type(status) is str:
+            status = data[status]
+        if type(entry) is str:
+            entry = data[entry]
+        if type(strata) is str:
+            strata = data[strata]
+        if type(offset) is str:
+            offset = data[offset]
+
+        mod = super(PHReg, cls).from_formula(formula, data,
+                    status=status, entry=entry, strata=strata,
+                    offset=offset, subset=subset, ties=ties,
+                    missing=missing, *args, **kwargs)
+
+        return mod
 
     def fit(self, groups=None, **args):
         """
@@ -357,11 +479,11 @@ class PHReg(model.LikelihoodModel):
         The penalty is the"elastic net" penalty, which
         is a convex combination of L1 and L2 penalties.
 
-        The function that is minimized is:
+        The function that is minimized is: ..math::
 
-        -loglike/n + alpha*((1-L1_wt)*|params|_2^2/2 + L1_wt*|params|_1)
+            -loglike/n + alpha*((1-L1_wt)*|params|_2^2/2 + L1_wt*|params|_1)
 
-        where |*|_1 and |*|_2 are the L1 and L2 norms.
+        where :math:`|*|_1` and :math:`|*|_2` are the L1 and L2 norms.
 
         Post-estimation results are based on the same data used to
         select variables, hence may be subject to overfitting biases.
@@ -983,8 +1105,8 @@ class PHReg(model.LikelihoodModel):
         Returns the hazard-weighted average of covariate values for
         subjects who are at-risk at a particular time.
 
-        Arguments
-        ---------
+        Parameters
+        ----------
         params : ndarray
             Parameter vector
 
@@ -1100,8 +1222,8 @@ class PHReg(model.LikelihoodModel):
                 xp0 -= e_linpred[ix].sum()
 
             cumhaz = np.cumsum(h0) - h0
-            surv = np.exp(-cumhaz)
-            rslt.append([uft, cumhaz, surv])
+            current_strata_surv = np.exp(-cumhaz)
+            rslt.append([uft, cumhaz, current_strata_surv])
 
         return rslt
 
@@ -1136,57 +1258,9 @@ class PHReg(model.LikelihoodModel):
 
         return cumhaz_f
 
-    def predict(self, params, cov_params=None, endog=None, exog=None,
+    def predict(self, params, exog=None, cov_params=None, endog=None,
                 strata=None, offset=None, pred_type="lhr"):
-        """
-        Returns predicted values from the proportional hazards
-        regression model.
-
-        Parameters:
-        -----------
-        params : array-like
-            The proportional hazards model parameters.
-        cov_params : array-like
-            The covariance matrix of the estimated `params` vector,
-            used to obtain prediction errors if pred_type='lhr',
-            otherwise optional.
-        endog : array-like
-            Duration (time) values at which the predictions are made.
-            Only used if pred_type is either 'cumhaz' or 'surv'.  If
-            using model `exog`, defaults to model `endog` (time), but
-            may be provided explicitly to make predictions at
-            alternative times.
-        exog : array-like
-            Data to use as `exog` in forming predictions.  If not
-            provided, the `exog` values from the model used to fit the
-            data are used.
-        strata : array-like
-            A vector of stratum values used to form the predictions.
-            Not used (may be 'None') if pred_type is 'lhr' or 'hr'.
-            If `exog` is None, the model stratum values are used.  If
-            `exog` is not None and pred_type is 'surv' or 'cumhaz',
-            stratum values must be provided (unless there is only one
-            stratum).
-        offset : array-like
-            Offset values used to create the predicted values.
-        pred_type : string
-            If 'lhr', returns log hazard ratios, if 'hr' returns
-            hazard ratios, if 'surv' returns the survival function, if
-            'cumhaz' returns the cumulative hazard function.
-
-        Returns
-        -------
-        A bunch containing two fields: `predicted_values` and
-        `standard_errors`.
-
-        Notes
-        -----
-        Standard errors are only returned when predicting the log
-        hazard ratio (pred_type is 'lhr').
-
-        Types `surv` and `cumhaz` require estimation of the cumulative
-        hazard function.
-        """
+        # docstring attached below
 
         pred_type = pred_type.lower()
         if pred_type not in ["lhr", "hr", "surv", "cumhaz"]:
@@ -1218,9 +1292,10 @@ class PHReg(model.LikelihoodModel):
 
         if pred_type == "lhr":
             ret_val.predicted_values = lhr
-            mat = np.dot(exog, cov_params)
-            va = (mat * exog).sum(1)
-            ret_val.standard_errors = np.sqrt(va)
+            if cov_params is not None:
+                mat = np.dot(exog, cov_params)
+                va = (mat * exog).sum(1)
+                ret_val.standard_errors = np.sqrt(va)
             return ret_val
 
         hr = np.exp(lhr)
@@ -1262,23 +1337,25 @@ class PHReg(model.LikelihoodModel):
 
         return ret_val
 
+    predict.__doc__ = _predict_docstring % {'cov_params_doc': _predict_cov_params_docstring}
+
     def get_distribution(self, params):
         """
         Returns a scipy distribution object corresponding to the
         distribution of uncensored endog (duration) values for each
         case.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         params : arrayh-like
             The model proportional hazards model parameters.
 
-        Returns:
-        --------
+        Returns
+        -------
         A list of objects of type scipy.stats.distributions.rv_discrete
 
-        Notes:
-        ------
+        Notes
+        -----
         The distributions are obtained from a simple discrete estimate
         of the survivor function that puts all mass on the observed
         failure times wihtin a stratum.
@@ -1406,12 +1483,12 @@ class PHRegResults(base.LikelihoodModelResults):
         distribution of uncensored endog (duration) values for each
         case.
 
-        Returns:
-        --------
+        Returns
+        -------
         A list of objects of type scipy.stats.distributions.rv_discrete
 
-        Notes:
-        ------
+        Notes
+        -----
         The distributions are obtained from a simple discrete estimate
         of the survivor function that puts all mass on the observed
         failure times wihtin a stratum.
@@ -1421,56 +1498,18 @@ class PHRegResults(base.LikelihoodModelResults):
 
 
     def predict(self, endog=None, exog=None, strata=None,
-                offset=None, pred_type="lhr"):
-        """
-        Returns predicted values from the fitted proportional hazards
-        regression model.
+                offset=None, transform=True, pred_type="lhr"):
+        # docstring attached below
 
-        Parameters:
-        -----------
-        params : array-;like
-            The proportional hazards model parameters.
-        endog : array-like
-            Duration (time) values at which the predictions are made.
-            Only used if pred_type is either 'cumhaz' or 'surv'.  If
-            using model `exog`, defaults to model `endog` (time), but
-            may be provided explicitly to make predictions at
-            alternative times.
-        exog : array-like
-            Data to use as `exog` in forming predictions.  If not
-            provided, the `exog` values from the model used to fit the
-            data are used.
-        strata : array-like
-            A vector of stratum values used to form the predictions.
-            Not used (may be 'None') if pred_type is 'lhr' or 'hr'.
-            If `exog` is None, the model stratum values are used.  If
-            `exog` is not None and pred_type is 'surv' or 'cumhaz',
-            stratum values must be provided (unless there is only one
-            stratum).
-        offset : array-like
-            Offset values used to create the predicted values.
-        pred_type : string
-            If 'lhr', returns log hazard ratios, if 'hr' returns
-            hazard ratios, if 'surv' returns the survival function, if
-            'cumhaz' returns the cumulative hazard function.
+        return super(PHRegResults, self).predict(exog=exog,
+                                                 transform=transform,
+                                                 cov_params=self.cov_params(),
+                                                 endog=endog,
+                                                 strata=strata,
+                                                 offset=offset,
+                                                 pred_type=pred_type)
 
-        Returns
-        -------
-        A bunch containing two fields: `predicted_values` and
-        `standard_errors`.
-
-        Notes
-        -----
-        Standard errors are only returned when predicting the log
-        hazard ratio (pred_type is 'lhr').
-
-        Types `surv` and `cumhaz` require estimation of the cumulative
-        hazard function.
-        """
-
-        return self.model.predict(self.params, self.cov_params(),
-                                  endog, exog, strata, offset,
-                                  pred_type)
+    predict.__doc__ = _predict_docstring % {'cov_params_doc': ''}
 
     def _group_stats(self, groups):
         """
@@ -1663,7 +1702,7 @@ class rv_discrete_float(object):
     """
     A class representing a collection of discrete distributions.
 
-    Parameters:
+    Parameters
     ----------
     xk : 2d array-like
         The support points, should be non-decreasing within each
@@ -1753,8 +1792,8 @@ def _opt_1d(funcs, start, L1_wt, tol):
     Optimize a L1-penalized smooth one-dimensional function of a
     single variable.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     funcs : tuple of functions
         funcs[0] is the objective function to be minimized.  funcs[1]
         and funcs[2] are, respectively, the first and second
@@ -1767,8 +1806,8 @@ def _opt_1d(funcs, start, L1_wt, tol):
     tol : non-negative real
         A convergence threshold.
 
-    Returns:
-    --------
+    Returns
+    -------
     The argmin of the objective function.
     """
 
@@ -1796,5 +1835,3 @@ def _opt_1d(funcs, start, L1_wt, tol):
         return brent(funcs[0], brack=(x-0.2, x+0.2), tol=tol)
 
     return x
-
-

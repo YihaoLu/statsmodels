@@ -73,14 +73,11 @@ Created on Feb 6, 2010
 @author: "josef pktd"
 '''
 from __future__ import print_function
-from statsmodels.compat.python import lzip, zip
+from statsmodels.compat.python import zip
 import numpy as np
 from numpy.testing import assert_almost_equal
 
-#from scipy.stats import t, norm
 from scipy import optimize, signal
-from scipy.misc import derivative
-from scipy.stats import ss as sumofsq
 
 import matplotlib.pyplot as plt
 
@@ -88,6 +85,12 @@ import numdifftools as ndt
 
 from statsmodels.base.model import Model, LikelihoodModelResults
 from statsmodels.sandbox import tsa
+
+
+def sumofsq(x, axis=0):
+    """Helper function to calculate sum of squares along first axis"""
+    return np.sum(x**2, axis=0)
+
 
 def normloglike(x, mu=0, sigma2=1, returnlls=False, axis=0):
 
@@ -999,7 +1002,7 @@ def generate_gjrgarch(nobs, ar, ma, mu=1., scale=0.1, varinnovation=None):
     #h = np.abs(h)
     #h = np.exp(h)
     #err = np.sqrt(h)*np.random.randn(nobs)
-    print('h.shape', h.shape)
+    #print('h.shape', h.shape)
     err = np.sqrt(h[:len(eta)])*eta #np.random.standard_t(8, size=len(h))
     return err, h, etax
 
@@ -1025,7 +1028,7 @@ def loglike_GARCH11(params, y):
     llvalues = -0.5*np.log(2*np.pi) - np.log(sqrtht) - 0.5*(x**2);
     return llvalues.sum(), llvalues, ht
 
-from statsmodels.tsa.filters import miso_lfilter
+from statsmodels.tsa.filters.filtertools import miso_lfilter
 #copied to statsmodels.tsa.filters.filtertools
 def miso_lfilter_old(ar, ma, x, useic=False): #[0.1,0.1]):
     '''

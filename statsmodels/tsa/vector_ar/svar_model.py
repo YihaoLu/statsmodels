@@ -41,8 +41,6 @@ class SVAR(tsbase.TimeSeriesModel):
     ----------
     endog : array-like
         1-d endogenous response variable. The independent variable.
-    names : array-like
-        must match number of columns or endog
     dates : array-like
         must match number of rows of endog
     svar_type : str
@@ -58,16 +56,9 @@ class SVAR(tsbase.TimeSeriesModel):
     ----------
     Hamilton (1994) Time Series Analysis
     """
-    def __init__(self, endog, svar_type, names=None, dates=None,
-                freq=None, A=None, B=None, missing='none'):
+    def __init__(self, endog, svar_type, dates=None,
+                 freq=None, A=None, B=None, missing='none'):
         super(SVAR, self).__init__(endog, None, dates, freq, missing=missing)
-        if names is not None:
-            import warnings
-            warnings.warn("The names argument is deprecated and will be "
-                    "removed in the next release.", FutureWarning)
-            self.names = names
-        else:
-            self.names = self.endog_names
         #(self.endog, self.names,
         # self.dates) = data_util.interpret_data(endog, names, dates)
 
@@ -233,7 +224,7 @@ class SVAR(tsbase.TimeSeriesModel):
         """
         k_trend = util.get_trendorder(trend)
         y = self.endog
-        z = util.get_var_endog(y, lags, trend=trend)
+        z = util.get_var_endog(y, lags, trend=trend, has_constant='raise')
         y_sample = y[lags:]
 
         # Lutkepohl p75, about 5x faster than stated formula
@@ -400,13 +391,13 @@ class SVAR(tsbase.TimeSeriesModel):
 
         #first generate duplication matrix, see MN (1980) for notation
 
-        D_nT=np.zeros([(1.0/2)*(neqs)*(neqs+1),neqs**2])
+        D_nT = np.zeros([int((1.0 / 2) * (neqs) * (neqs + 1)), neqs**2])
 
         for j in range(neqs):
             i=j
             while j <= i < neqs:
-                u=np.zeros([(1.0/2)*neqs*(neqs+1),1])
-                u[(j)*neqs+(i+1)-(1.0/2)*(j+1)*j-1]=1
+                u=np.zeros([int((1.0/2)*neqs*(neqs+1)), 1])
+                u[int(j * neqs + (i + 1) - (1.0 / 2) * (j + 1) * j - 1)] = 1
                 Tij=np.zeros([neqs,neqs])
                 Tij[i,j]=1
                 Tij[j,i]=1
@@ -618,15 +609,6 @@ class SVARResults(SVARProcess, VARResults):
 
         super(SVARResults, self).__init__(coefs, intercept, sigma_u, A,
                              B, names=names)
-
-    @cache_readonly
-    def coef_names(self):
-        """Coefficient names (deprecated)
-        """
-        from warnings import warn
-        warn("coef_names is deprecated and will be removed in 0.6.0."
-             "Use exog_names", FutureWarning)
-        return self.exog_names
 
     def irf(self, periods=10, var_order=None):
         """

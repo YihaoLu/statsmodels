@@ -12,7 +12,7 @@ from scipy.linalg import cholesky
 
 #-------------------------------------------------------------------------------
 # Auxiliary functions for estimation
-def get_var_endog(y, lags, trend='c'):
+def get_var_endog(y, lags, trend='c', has_constant='skip'):
     """
     Make predictor matrix for VAR(p) process
 
@@ -20,6 +20,8 @@ def get_var_endog(y, lags, trend='c'):
     Z_t = [1 y_t y_{t-1} ... y_{t - p + 1}] (Kp x 1)
 
     Ref: Lutkepohl p.70 (transposed)
+
+    has_constant can be 'raise', 'add', or 'skip'. See add_constant.
     """
     nobs = len(y)
     # Ravel C order, need to put in descending order
@@ -27,7 +29,8 @@ def get_var_endog(y, lags, trend='c'):
 
     # Add constant, trend, etc.
     if trend != 'nc':
-        Z = tsa.add_trend(Z, prepend=True, trend=trend)
+        Z = tsa.add_trend(Z, prepend=True, trend=trend,
+                          has_constant=has_constant)
 
     return Z
 
@@ -47,14 +50,14 @@ def make_lag_names(names, lag_order, trendorder=1):
     """
     Produce list of lag-variable names. Constant / trends go at the beginning
 
-    Example
-    -------
+    Examples
+    --------
     >>> make_lag_names(['foo', 'bar'], 2, 1)
     ['const', 'L1.foo', 'L1.bar', 'L2.foo', 'L2.bar']
 
     """
     lag_names = []
-    if isinstance(names, string_types):     
+    if isinstance(names, string_types):
         names = [names]
 
     # take care of lagged endogenous names
@@ -156,18 +159,18 @@ def parse_lutkepohl_data(path): # pragma: no cover
 
     return data, date_range
 
+
 def get_logdet(m):
-    from numpy.linalg import slogdet
-    logdet = slogdet(m)
+    from statsmodels.tools.linalg import logdet_symm
+    return logdet_symm(m)
 
-    if logdet[0] == -1: # pragma: no cover
-        raise ValueError("Matrix is not positive definite")
-    elif logdet[0] == 0: # pragma: no cover
-        raise ValueError("Matrix is singular")
-    else:
-        logdet = logdet[1]
 
-    return logdet
+get_logdet = np.deprecate(get_logdet,
+                          "statsmodels.tsa.vector_ar.util.get_logdet",
+                          "statsmodels.tools.linalg.logdet_symm",
+                          "get_logdet is deprecated and will be removed in "
+                          "0.8.0")
+
 
 def norm_signif_level(alpha=0.05):
     return stats.norm.ppf(1 - alpha / 2)

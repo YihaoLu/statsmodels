@@ -27,6 +27,7 @@ Statistics. 14:3, 643-656.
 
 
 """
+from __future__ import division
 
 import numpy as np
 from statsmodels.regression.linear_model import OLS, WLS
@@ -234,7 +235,7 @@ class emplikeAFT(object):
     estimation and inference possible.
     """
     def __init__(self, endog, exog, censors):
-        self.nobs = float(np.shape(exog)[0])
+        self.nobs = np.shape(exog)[0]
         self.endog = endog.reshape(self.nobs, 1)
         self.exog = exog.reshape(self.nobs, -1)
         self.censors = censors.reshape(self.nobs, 1)
@@ -244,7 +245,7 @@ class emplikeAFT(object):
         self.exog = self.exog[idx]
         self.censors = self.censors[idx]
         self.censors[-1] = 1  # Sort in init, not in function
-        self.uncens_nobs = np.sum(self.censors)
+        self.uncens_nobs = int(np.sum(self.censors))
         mask = self.censors.ravel().astype(bool)
         self.uncens_endog = self.endog[mask, :].reshape(-1, 1)
         self.uncens_exog = self.exog[mask, :]
@@ -281,12 +282,10 @@ class emplikeAFT(object):
         Computes KM estimator value at each observation, taking into acocunt
         ties in the data.
 
-        Parameters:
+        Parameters
         ----------
-
         tie_indic: 1d array
             Indicates if the i'th observation is the same as the ith +1
-
         untied_km: 1d array
             Km estimates at each observation assuming no ties.
 
@@ -315,16 +314,13 @@ class emplikeAFT(object):
 
         Parameters
         ----------
-
         endog: nx1 array
             Array of response variables
-
         censors: nx1 array
             Censor-indicating variable
 
         Returns
-        ------
-
+        -------
         Kaplan Meier estimate for each observation
 
         Notes

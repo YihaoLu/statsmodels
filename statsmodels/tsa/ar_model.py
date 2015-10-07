@@ -4,7 +4,7 @@ from statsmodels.compat.python import iteritems, range, string_types, lmap
 import numpy as np
 from numpy import dot, identity
 from numpy.linalg import inv, slogdet
-from scipy.stats import norm, ss as sumofsq
+from scipy.stats import norm
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tsa.tsatools import (lagmat, add_trend,
                                       _ar_transparams, _ar_invtransparams)
@@ -20,6 +20,11 @@ from statsmodels.tsa.base.datetools import _index_date
 
 
 __all__ = ['AR']
+
+
+def sumofsq(x, axis=0):
+    """Helper function to calculate sum of squares along first axis"""
+    return np.sum(x**2, axis=0)
 
 
 def _check_ar_start(start, k_ar, method, dynamic):
@@ -595,7 +600,7 @@ class AR(tsbase.TimeSeriesModel):
         pinv_exog = np.linalg.pinv(X)
         normalized_cov_params = np.dot(pinv_exog, pinv_exog.T)
         arfit = ARResults(self, params, normalized_cov_params)
-        if method == 'mle':
+        if method == 'mle' and full_output:
             arfit.mle_retvals = mlefit.mle_retvals
             arfit.mle_settings = mlefit.mle_settings
         return ARResultsWrapper(arfit)

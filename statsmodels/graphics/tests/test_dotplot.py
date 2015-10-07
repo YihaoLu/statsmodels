@@ -9,10 +9,8 @@ pdf_output = False
 try:
     import matplotlib.pyplot as plt
     import matplotlib
-    if matplotlib.__version__ < '1':
-        raise
     have_matplotlib = True
-except:
+except ImportError:
     have_matplotlib = False
 
 
@@ -373,6 +371,28 @@ def test_all():
     line_order = ["B", "C", "A", "D"]
     fig = dot_plot(points, lines=lines, line_order=line_order, ax=ax)
     ax.set_title("Dotplot with reordered lines")
+    close_or_save(pdf, fig)
+
+    # Format labels
+    plt.clf()
+    points = range(20)
+    lines = ["%d::%d" % (i, 100+i) for i in range(20)]
+    fmt_left = lambda x : "lft_" + x
+    fmt_right = lambda x : "rgt_" + x
+    ax = plt.axes()
+    fig = dot_plot(points, lines=lines, ax=ax, split_names="::",
+                   fmt_left_name=fmt_left, fmt_right_name=fmt_right)
+    ax.set_title("Horizontal dotplot with name formatting")
+    close_or_save(pdf, fig)
+
+    # Right names only
+    plt.clf()
+    points = range(20)
+    lines = ["%d::%d" % (i, 100+i) for i in range(20)]
+    ax = plt.axes()
+    fig = dot_plot(points, lines=lines, ax=ax, split_names="::",
+                   show_names="right")
+    ax.set_title("Show right names only")
     close_or_save(pdf, fig)
 
     # Dotplot with different numbers of points per line

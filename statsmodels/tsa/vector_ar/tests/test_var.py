@@ -3,7 +3,8 @@ Test VAR Model
 """
 from __future__ import print_function
 # pylint: disable=W0612,W0231
-from statsmodels.compat.python import iteritems, StringIO, lrange, BytesIO, range
+from statsmodels.compat.python import (iteritems, StringIO, lrange, BytesIO,
+                                       range)
 from nose.tools import assert_raises
 import nose
 import os
@@ -12,13 +13,13 @@ import sys
 import numpy as np
 
 import statsmodels.api as sm
-import statsmodels.tsa.vector_ar.var_model as model
 import statsmodels.tsa.vector_ar.util as util
 import statsmodels.tools.data as data_util
 from statsmodels.tsa.vector_ar.var_model import VAR
 
 
-from numpy.testing import assert_almost_equal, assert_equal, assert_
+from numpy.testing import (assert_almost_equal, assert_equal, assert_,
+                           assert_allclose)
 
 DECIMAL_12 = 12
 DECIMAL_6 = 6
@@ -154,10 +155,8 @@ def teardown_module():
 def have_matplotlib():
     try:
         import matplotlib
-        if matplotlib.__version__ < '1':
-            raise ImportError("matplotlib not is too old.  Please update.")
         return True
-    except:
+    except ImportError:
         return False
 
 class CheckIRF(object):
@@ -240,7 +239,7 @@ class TestVARResults(CheckIRF, CheckFEVD):
 
         cls.data = get_macrodata()
         cls.model = VAR(cls.data)
-        cls.names = cls.model.names
+        cls.names = cls.model.endog_names
 
         cls.ref = RResults()
         cls.k = len(cls.ref.names)
@@ -258,10 +257,10 @@ class TestVARResults(CheckIRF, CheckFEVD):
         res = model.fit(self.p)
 
     def test_names(self):
-        assert_equal(self.model.names, self.ref.names)
+        assert_equal(self.model.endog_names, self.ref.names)
 
-        model2 = VAR(self.data, names=self.names)
-        assert_equal(model2.names, self.ref.names)
+        model2 = VAR(self.data)
+        assert_equal(model2.endog_names, self.ref.names)
 
     def test_get_eq_index(self):
         assert(type(self.res.names) is list)
@@ -428,7 +427,7 @@ class TestVARResults(CheckIRF, CheckFEVD):
         names2.append(names[2])
         names2.append(names[0])
         names2.append(names[1])
-        res2 = VAR(data2,names=names2).fit(maxlags=self.p)
+        res2 = VAR(data2).fit(maxlags=self.p)
 
         #use reorder function
         res3 = self.res.reorder(['realinv','realgdp', 'realcons'])
@@ -511,13 +510,11 @@ class TestVARResultsLutkepohl(object):
         self.p = 2
         sdata, dates = get_lutkepohl_data('e1')
 
-        names = sdata.dtype.names
         data = data_util.struct_to_ndarray(sdata)
         adj_data = np.diff(np.log(data), axis=0)
         # est = VAR(adj_data, p=2, dates=dates[1:], names=names)
 
-        self.model = VAR(adj_data[:-16], dates=dates[1:-16], names=names,
-                freq='Q')
+        self.model = VAR(adj_data[:-16], dates=dates[1:-16], freq='Q')
         self.res = self.model.fit(maxlags=self.p)
         self.irf = self.res.irf(10)
         self.lut = E1_Results()
@@ -558,6 +555,72 @@ def test_get_trendorder():
 
     for t, trendorder in iteritems(results):
         assert(util.get_trendorder(t) == trendorder)
+
+
+def test_var_constant():
+    # see 2043
+    import datetime
+    from pandas import DataFrame, DatetimeIndex
+
+    series = np.array([[2., 2.], [1, 2.], [1, 2.], [1, 2.], [1., 2.]])
+    data = DataFrame(series)
+
+    d = datetime.datetime.now()
+    delta = datetime.timedelta(days=1)
+    index = []
+    for i in range(data.shape[0]):
+        index.append(d)
+        d += delta
+
+    data.index = DatetimeIndex(index)
+
+    model = VAR(data)
+    assert_raises(ValueError, model.fit, 1)
+
+def test_var_trend():
+    # see 2271
+    data = get_macrodata().view((float,3))
+
+    model = sm.tsa.VAR(data)
+    results = model.fit(4) #, trend = 'c')
+    irf = results.irf(10)
+
+
+    data_nc = data - data.mean(0)
+    model_nc = sm.tsa.VAR(data_nc)
+    results_nc = model_nc.fit(4, trend = 'nc')
+    assert_raises(ValueError, model.fit, 4, trend='t')
+
+
+def test_irf_trend():
+    # test for irf with different trend see #1636
+    # this is a rough comparison by adding trend or subtracting mean to data
+    # to get similar AR coefficients and IRF
+    data = get_macrodata().view((float,3))
+
+    model = sm.tsa.VAR(data)
+    results = model.fit(4) #, trend = 'c')
+    irf = results.irf(10)
+
+
+    data_nc = data - data.mean(0)
+    model_nc = sm.tsa.VAR(data_nc)
+    results_nc = model_nc.fit(4, trend = 'nc')
+    irf_nc = results_nc.irf(10)
+
+    assert_allclose(irf_nc.stderr()[1:4], irf.stderr()[1:4], rtol=0.01)
+
+    trend = 1e-3 * np.arange(len(data)) / (len(data) - 1)
+    # for pandas version, currently not used, if data is a pd.DataFrame
+    #data_t = pd.DataFrame(data.values + trend[:,None], index=data.index, columns=data.columns)
+    data_t = data + trend[:,None]
+
+    model_t = sm.tsa.VAR(data_t)
+    results_t = model_t.fit(4, trend = 'ct')
+    irf_t = results_t.irf(10)
+
+    assert_allclose(irf_t.stderr()[1:4], irf.stderr()[1:4], rtol=0.03)
+
 
 if __name__ == '__main__':
     import nose

@@ -1,27 +1,15 @@
 """
 Compatibility tools for differences between Python 2 and 3
 """
-
 import functools
 import itertools
 import sys
+import urllib
 
 PY3 = (sys.version_info[0] >= 3)
 PY3_2 = sys.version_info[:2] == (3, 2)
 
-try:
-    import __builtin__ as builtins
-    # not writeable when instantiated with string, doesn't handle unicode well
-    from cStringIO import StringIO as cStringIO
-    # always writeable
-    from StringIO import StringIO
-
-    BytesIO = StringIO
-    import cPickle
-    pickle = cPickle
-    import urllib2
-    import urlparse
-except ImportError:
+if PY3:
     import builtins
     from io import StringIO, BytesIO
 
@@ -30,13 +18,11 @@ except ImportError:
     pickle = cPickle
     import urllib.request
     import urllib.parse
-    from urllib.request import HTTPError, urlretrieve
-
-if PY3:
+    from urllib.request import HTTPError, urlretrieve, URLError
     import io
     bytes = bytes
     str = str
-    asunicode = str
+    asunicode = lambda x, _ : str(x)
 
     def asbytes(s):
         if isinstance(s, bytes):
@@ -90,10 +76,23 @@ if PY3:
     urlopen = urllib.request.urlopen
     urljoin = urllib.parse.urljoin
     urlretrieve = urllib.request.urlretrieve
+    urlencode = urllib.parse.urlencode
     string_types = str
     input = input
 
 else:
+    import __builtin__ as builtins
+    # not writeable when instantiated with string, doesn't handle unicode well
+    from cStringIO import StringIO as cStringIO
+    # always writeable
+    from StringIO import StringIO
+
+    BytesIO = StringIO
+    import cPickle
+    pickle = cPickle
+    import urllib2
+    import urlparse
+
     bytes = str
     str = str
     asbytes = str
@@ -104,10 +103,10 @@ else:
     def isfileobj(f):
         return isinstance(f, file)
 
-    def asunicode(s):
-        if isinstance(s, str):
+    def asunicode(s, encoding='ascii'):
+        if isinstance(s, unicode):
             return s
-        return s.decode('ascii')
+        return s.decode(encoding)
 
     def open_latin1(filename, mode='r'):
         return open(filename, mode=mode)
@@ -130,7 +129,9 @@ else:
 
     urlopen = urllib2.urlopen
     urljoin = urlparse.urljoin
+    urlencode = urllib.urlencode
     HTTPError = urllib2.HTTPError
+    URLError = urllib2.URLError
     string_types = basestring
 
     input = raw_input

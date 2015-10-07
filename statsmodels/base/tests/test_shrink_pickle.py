@@ -9,6 +9,7 @@ from __future__ import print_function
 from statsmodels.compat.python import iterkeys, cPickle, BytesIO
 import numpy as np
 import statsmodels.api as sm
+import pandas as pd
 
 from numpy.testing import assert_
 
@@ -45,6 +46,7 @@ class RemoveDataPickle(object):
         x = sm.add_constant(x)
         self.exog = x
         self.xf = 0.25 * np.ones((2, 4))
+        self.l_max = 20000
 
     def test_remove_data_pickle(self):
         if winoldnp:
@@ -77,8 +79,9 @@ class RemoveDataPickle(object):
         self.res = res
 
         #Note: l_max is just a guess for the limit on the length of the pickle
-        l_max = 20000
+        l_max = self.l_max
         assert_(l < l_max, msg='pickle length not %d < %d' % (l, l_max))
+
 
         pred3 = results.predict(xf, **pred_kwds)
         np.testing.assert_equal(pred3, pred1)
@@ -200,6 +203,65 @@ class TestRemoveDataPickleGLM(RemoveDataPickle):
         np.random.seed(987689)
         y = x.sum(1) + np.random.randn(x.shape[0])
         self.results = sm.GLM(y, self.exog).fit()
+
+
+class TestPickleFormula(RemoveDataPickle):
+    @classmethod
+    def setup_class(cls):
+        nobs = 10000
+        np.random.seed(987689)
+        x = np.random.randn(nobs, 3)
+        cls.exog = pd.DataFrame(x, columns=["A", "B", "C"])
+        cls.xf = pd.DataFrame(0.25 * np.ones((2, 3)),
+                              columns=cls.exog.columns)
+        cls.l_max = 900000  # have to pickle endo/exog to unpickle form.
+
+    def setup(self):
+        x = self.exog
+        np.random.seed(123)
+        y = x.sum(1) + np.random.randn(x.shape[0])
+        y = pd.Series(y, name="Y")
+        X = self.exog.copy()
+        X["Y"] = y
+        self.results = sm.OLS.from_formula("Y ~ A + B + C", data=X).fit()
+
+
+class TestPickleFormula2(RemoveDataPickle):
+    @classmethod
+    def setup_class(cls):
+        nobs = 500
+        np.random.seed(987689)
+        data = np.random.randn(nobs, 4)
+        data[:,0] = data[:, 1:].sum(1)
+        cls.data = pd.DataFrame(data, columns=["Y", "A", "B", "C"])
+        cls.xf = pd.DataFrame(0.25 * np.ones((2, 3)),
+                              columns=cls.data.columns[1:])
+        cls.l_max = 900000  # have to pickle endo/exog to unpickle form.
+
+    def setup(self):
+        self.results = sm.OLS.from_formula("Y ~ A + B + C", data=self.data).fit()
+
+
+class TestPickleFormula3(TestPickleFormula2):
+
+    def setup(self):
+        self.results = sm.OLS.from_formula("Y ~ A + B * C", data=self.data).fit()
+
+
+class TestPickleFormula4(TestPickleFormula2):
+
+    def setup(self):
+        self.results = sm.OLS.from_formula("Y ~ np.log(A) + B * C", data=self.data).fit()
+
+# we need log in module namespace for the following test
+from numpy import log
+class TestPickleFormula5(TestPickleFormula2):
+
+    def setup(self):
+        # if we import here, then unpickling fails -> exception in test
+        #from numpy import log
+        self.results = sm.OLS.from_formula("Y ~ log(A) + B * C", data=self.data).fit()
+
 
 if __name__ == '__main__':
     for cls in [TestRemoveDataPickleOLS, TestRemoveDataPickleWLS,

@@ -9,18 +9,11 @@ from __future__ import print_function
 from statsmodels.compat.python import lmap, range
 import numpy as np
 from scipy.linalg import svd as decomp_svd
-#decomp_svd
-
-#check which imports we need here:
-from scipy.linalg.flinalg import get_flinalg_funcs
 from scipy.linalg.lapack import get_lapack_funcs
-from numpy import asarray,zeros,sum,newaxis,greater_equal,subtract,arange,\
-     conjugate,ravel,r_,mgrid,take,ones,dot,transpose,sqrt,add,real
+from numpy import asarray, zeros, sum, conjugate, dot, transpose
 import numpy
-from numpy import asarray_chkfinite, outer, concatenate, reshape, single
-#from numpy import matrix as Matrix
+from numpy import asarray_chkfinite, single
 from numpy.linalg import LinAlgError
-from scipy.linalg import calc_lwork
 
 
 ### Linear Least Squares
@@ -59,41 +52,53 @@ def lstsq(a, b, cond=None, overwrite_a=0, overwrite_b=0):
     Raises LinAlgError if computation does not converge
 
     """
-    a1, b1 = lmap(asarray_chkfinite,(a,b))
-    if len(a1.shape) != 2:
+    a1, b1 = lmap(asarray_chkfinite, (a, b))
+    if a1.ndim != 2:
         raise ValueError('expected matrix')
-    m,n = a1.shape
-    if len(b1.shape)==2: nrhs = b1.shape[1]
-    else: nrhs = 1
+    m, n = a1.shape
+    if b1.ndim == 2:
+        nrhs = b1.shape[1]
+    else:
+        nrhs = 1
     if m != b1.shape[0]:
         raise ValueError('incompatible dimensions')
-    gelss, = get_lapack_funcs(('gelss',),(a1,b1))
-    if n>m:
+    gelss, = get_lapack_funcs(('gelss',), (a1, b1))
+    if n > m:
         # need to extend b matrix as it will be filled with
         # a larger solution matrix
-        b2 = zeros((n,nrhs), dtype=gelss.dtype)
-        if len(b1.shape)==2: b2[:m,:] = b1
-        else: b2[:m,0] = b1
+        b2 = zeros((n, nrhs), dtype=gelss.dtype)
+        if b1.ndim == 2:
+            b2[:m, :] = b1
+        else:
+            b2[:m, 0] = b1
         b1 = b2
-    overwrite_a = overwrite_a or (a1 is not a and not hasattr(a,'__array__'))
-    overwrite_b = overwrite_b or (b1 is not b and not hasattr(b,'__array__'))
+    overwrite_a = overwrite_a or (a1 is not a and not hasattr(a, '__array__'))
+    overwrite_b = overwrite_b or (b1 is not b and not hasattr(b, '__array__'))
+
     if gelss.module_name[:7] == 'flapack':
-        lwork = calc_lwork.gelss(gelss.prefix,m,n,nrhs)[1]
-        v,x,s,rank,info = gelss(a1,b1,cond = cond,
-                                lwork = lwork,
-                                overwrite_a = overwrite_a,
-                                overwrite_b = overwrite_b)
+
+        # get optimal work array
+        work = gelss(a1, b1, lwork=-1)[4]
+        lwork = work[0].real.astype(np.int)
+        v, x, s, rank, work, info = gelss(
+            a1, b1, cond=cond, lwork=lwork, overwrite_a=overwrite_a,
+            overwrite_b=overwrite_b)
+
     else:
-        raise NotImplementedError('calling gelss from %s' % (gelss.module_name))
-    if info>0: raise LinAlgError("SVD did not converge in Linear Least Squares")
-    if info<0: raise ValueError(\
-       'illegal value in %-th argument of internal gelss'%(-info))
+        raise NotImplementedError('calling gelss from %s' %
+                                  gelss.module_name)
+    if info > 0:
+        raise LinAlgError("SVD did not converge in Linear Least Squares")
+    if info < 0:
+        raise ValueError('illegal value in %-th argument of '
+                         'internal gelss' % -info)
     resids = asarray([], dtype=x.dtype)
-    if n<m:
+    if n < m:
         x1 = x[:n]
-        if rank==n: resids = sum(x[n:]**2,axis=0)
+        if rank == n:
+            resids = sum(x[n:]**2, axis=0)
         x = x1
-    return x,resids,rank,s
+    return x, resids, rank, s
 
 
 def pinv(a, cond=None, rcond=None):
@@ -140,6 +145,7 @@ feps = numpy.finfo(single).eps
 
 _array_precision = {'f': 0, 'd': 1, 'F': 0, 'D': 1}
 
+
 def pinv2(a, cond=None, rcond=None):
     """Compute the (Moore-Penrose) pseudo-inverse of a matrix.
 
@@ -180,16 +186,87 @@ def pinv2(a, cond=None, rcond=None):
     t = u.dtype.char
     if rcond is not None:
         cond = rcond
-    if cond in [None,-1]:
+    if cond in [None, -1]:
         cond = {0: feps*1e3, 1: eps*1e6}[_array_precision[t]]
-    m,n = a.shape
+    m, n = a.shape
     cutoff = cond*numpy.maximum.reduce(s)
-    psigma = zeros((m,n),t)
+    psigma = zeros((m, n), t)
     for i in range(len(s)):
         if s[i] > cutoff:
-            psigma[i,i] = 1.0/conjugate(s[i])
-    #XXX: use lapack/blas routines for dot
-    return transpose(conjugate(dot(dot(u,psigma),vh)))
+            psigma[i, i] = 1.0/conjugate(s[i])
+    # XXX: use lapack/blas routines for dot
+    return transpose(conjugate(dot(dot(u, psigma), vh)))
+
+
+def logdet_symm(m, check_symm=False):
+    """
+    Return log(det(m)) asserting positive definiteness of m.
+
+    Parameters
+    ----------
+    m : array-like
+        2d array that is positive-definite (and symmetric)
+
+    Returns
+    -------
+    logdet : float
+        The log-determinant of m.
+    """
+    from scipy import linalg
+    if check_symm:
+        if not np.all(m == m.T):  # would be nice to short-circuit check
+            raise ValueError("m is not symmetric.")
+    c, _ = linalg.cho_factor(m, lower=True)
+    return 2*np.sum(np.log(c.diagonal()))
+
+
+def stationary_solve(r, b):
+    """
+    Solve a linear system for a Toeplitz correlation matrix.
+
+    A Toeplitz correlation matrix represents the covariance of a
+    stationary series with unit variance.
+
+    Parameters
+    ----------
+    r : array-like
+        A vector describing the coefficient matrix.  r[0] is the first
+        band next to the diagonal, r[1] is the second band, etc.
+    b : array-like
+        The right-hand side for which we are solving, i.e. we solve
+        Tx = b and return b, where T is the Toeplitz coefficient matrix.
+
+    Returns
+    -------
+    The solution to the linear system.
+    """
+
+    db = r[0:1]
+
+    dim = b.ndim
+    if b.ndim == 1:
+        b = b[:, None]
+    x = b[0:1,:]
+
+    for j in range(1, len(b)):
+        rf = r[0:j][::-1]
+        a = (b[j,:] - np.dot(rf, x)) / (1 - np.dot(rf, db[::-1]))
+        z = x - np.outer(db[::-1], a)
+        x = np.concatenate((z, a[None, :]), axis=0)
+
+        if j == len(b) - 1:
+            break
+
+        rn = r[j]
+        a = (rn - np.dot(rf, db)) / (1 - np.dot(rf, db[::-1]))
+        z = db - a*db[::-1]
+        db = np.concatenate((z, np.r_[a]))
+
+    if dim == 1:
+        x = x[:, 0]
+
+    return x
+
 
 
 if __name__ == '__main__':
@@ -197,7 +274,7 @@ if __name__ == '__main__':
     #Note on Windows32:
     #    linalg doesn't always produce the same results in each call
     a0 = np.random.randn(100,10)
-    b0 = a0.sum(1)[:,None] + np.random.randn(100,3)
+    b0 = a0.sum(1)[:, None] + np.random.randn(100,3)
     lstsq(a0,b0)
     pinv(a0)
     pinv2(a0)

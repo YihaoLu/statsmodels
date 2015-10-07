@@ -1,9 +1,10 @@
 import numpy as np
-from numpy.testing import assert_equal, assert_
+from numpy.testing import assert_equal, assert_, assert_raises
 import pandas
 import pandas.util.testing as ptesting
 
 from statsmodels.base import data as sm_data
+from statsmodels.formula import handle_formula_data
 
 #class TestDates(object):
 #    @classmethod
@@ -524,7 +525,7 @@ class TestMissingArray(object):
         np.testing.assert_array_equal(data.exog, X)
 
     def test_none(self):
-        data = sm_data.handle_data(self.y, self.X, 'none')
+        data = sm_data.handle_data(self.y, self.X, 'none', hasconst=False)
         np.testing.assert_array_equal(data.endog, self.y)
         np.testing.assert_array_equal(data.exog, self.X)
 
@@ -593,7 +594,7 @@ class TestMissingPandas(object):
         ptesting.assert_frame_equal(data.orig_exog, self.X.ix[idx])
 
     def test_none(self):
-        data = sm_data.handle_data(self.y, self.X, 'none')
+        data = sm_data.handle_data(self.y, self.X, 'none', hasconst=False)
         np.testing.assert_array_equal(data.endog, self.y.values)
         np.testing.assert_array_equal(data.exog, self.X.values)
 
@@ -726,8 +727,9 @@ class CheckHasConstant(object):
                 assert_equal(mod.data.const_idx, result[1])
 
             # extra check after fit, some models raise on singular
+            fit_kwds = getattr(self, 'fit_kwds', {})
             try:
-                res = mod.fit()
+                res = mod.fit(**fit_kwds)
                 assert_equal(res.model.k_constant, result[0])
                 assert_equal(res.model.data.k_constant, result[0])
             except:
@@ -745,9 +747,9 @@ class CheckHasConstant(object):
         x2 = np.column_stack((np.arange(20) < 10.5,
                               np.arange(20) > 10.5)).astype(float)
         result2 = (1, None)
-        x3 = np.column_stack((np.arange(20), np.zeros(20.)))
+        x3 = np.column_stack((np.arange(20), np.zeros(20)))
         result3 = (0, None)
-        x4 = np.column_stack((np.arange(20), np.zeros((20., 2))))
+        x4 = np.column_stack((np.arange(20), np.zeros((20, 2))))
         result4 = (0, None)
         x5 = np.column_stack((np.zeros(20), 0.5 * np.ones(20)))
         result5 = (1, 1)
@@ -758,11 +760,11 @@ class CheckHasConstant(object):
         # implicit and zero column
         x6 = np.column_stack((np.arange(20) < 10.5,
                               np.arange(20) > 10.5,
-                              np.zeros(20.))).astype(float)
+                              np.zeros(20))).astype(float)
         result6 = (1, None)
         x7 = np.column_stack((np.arange(20) < 10.5,
                               np.arange(20) > 10.5,
-                              np.zeros((20., 2)))).astype(float)
+                              np.zeros((20, 2)))).astype(float)
         result7 = (1, None)
 
         cls.exogs = (x1, x2, x3, x4, x5, x5b, x5c, x6, x7)
@@ -795,6 +797,93 @@ class TestHasConstantLogit(CheckHasConstant):
         from statsmodels.discrete.discrete_model import Logit
         self.mod = Logit
         self.y = self.y_bin
+        self.fit_kwds = {'disp': False}
+
+
+def test_dtype_object():
+    # see #880
+
+    X = np.random.random((40,2))
+    df = pandas.DataFrame(X)
+    df[2] = np.random.randint(2, size=40).astype('object')
+    df['constant'] = 1
+
+    y = pandas.Series(np.random.randint(2, size=40))
+
+    np.testing.assert_raises(ValueError, sm_data.handle_data, y, df)
+
+
+def test_formula_missing_extra_arrays():
+    np.random.seed(1)
+    # because patsy can't turn off missing data-handling as of 0.3.0, we need
+    # separate tests to make sure that missing values are handled correctly
+    # when going through formulas
+
+    # there is a handle_formula_data step
+    # then there is the regular handle_data step
+    # see 2083
+
+    # the untested cases are endog/exog have missing. extra has missing.
+    # endog/exog are fine. extra has missing.
+    # endog/exog do or do not have missing and extra has wrong dimension
+    y = np.random.randn(10)
+    y_missing = y.copy()
+    y_missing[[2, 5]] = np.nan
+    X = np.random.randn(10)
+    X_missing = X.copy()
+    X_missing[[1, 3]] = np.nan
+
+    weights = np.random.uniform(size=10)
+    weights_missing = weights.copy()
+    weights_missing[[6]] = np.nan
+
+    weights_wrong_size = np.random.randn(12)
+
+    data = {'y': y,
+            'X': X,
+            'y_missing': y_missing,
+            'X_missing': X_missing,
+            'weights': weights,
+            'weights_missing': weights_missing}
+    data = pandas.DataFrame.from_dict(data)
+    data['constant'] = 1
+
+    formula = 'y_missing ~ X_missing'
+
+    ((endog, exog),
+     missing_idx, design_info) = handle_formula_data(data, None, formula,
+                                                     depth=2,
+                                                     missing='drop')
+
+    kwargs = {'missing_idx': missing_idx, 'missing': 'drop',
+              'weights': data['weights_missing']}
+
+    model_data = sm_data.handle_data(endog, exog, **kwargs)
+    data_nona = data.dropna()
+    assert_equal(data_nona['y'].values, model_data.endog)
+    assert_equal(data_nona[['constant', 'X']].values, model_data.exog)
+    assert_equal(data_nona['weights'].values, model_data.weights)
+
+    tmp = handle_formula_data(data, None, formula, depth=2, missing='drop')
+    (endog, exog), missing_idx, design_info = tmp
+    weights_2d = np.random.randn(10, 10)
+    weights_2d[[8, 7], [7, 8]] = np.nan  #symmetric missing values
+    kwargs.update({'weights': weights_2d,
+                   'missing_idx': missing_idx})
+
+    model_data2 = sm_data.handle_data(endog, exog, **kwargs)
+
+    good_idx = [0, 4, 6, 9]
+    assert_equal(data.ix[good_idx, 'y'], model_data2.endog)
+    assert_equal(data.ix[good_idx, ['constant', 'X']], model_data2.exog)
+    assert_equal(weights_2d[good_idx][:, good_idx], model_data2.weights)
+
+    tmp = handle_formula_data(data, None, formula, depth=2, missing='drop')
+    (endog, exog), missing_idx, design_info = tmp
+
+    kwargs.update({'weights': weights_wrong_size,
+                   'missing_idx': missing_idx})
+    assert_raises(ValueError, sm_data.handle_data, endog, exog, **kwargs)
 
 
 if __name__ == "__main__":
